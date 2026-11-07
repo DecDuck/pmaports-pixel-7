@@ -2,16 +2,18 @@
 maintainer=""
 pkgname=device-google-panther
 pkgver=1
-pkgrel=17
+pkgrel=18
 pkgdesc="Google Pixel 7"
 url="https://nura.eco"
 arch="aarch64"
 license="MIT"
 depends="
 	android-tools
+	device-mapper
 	linux-firmware-arm
 	linux-postmarketos-gs201
 	postmarketos-base
+	python3
 	soc-google-gs201
 	"
 makedepends="devicepkg-dev"
@@ -20,7 +22,16 @@ source="
 	kernel-cmdline.conf
 	modules-initfs
 	disable-suspend.conf
+	panther-extract-firmware
+	panther-extract-firmware.service
+	panther-extract-firmware.initd
+	80-device-google-panther.preset
 	"
+install="
+	$pkgname-openrc.post-install
+	$pkgname-openrc.post-upgrade
+	"
+subpackages="$pkgname-openrc"
 options="!archcheck !check"
 
 build() {
@@ -34,10 +45,28 @@ package() {
 		"$pkgdir"/usr/lib/systemd/sleep.conf.d/50-panther-disable-suspend.conf
 	install -Dm644 "$srcdir"/disable-suspend.conf \
 		"$pkgdir"/usr/lib/elogind/sleep.conf.d/50-panther-disable-suspend.conf
+
+	# Bluetooth firmware can't be redistributed; copy it from Android
+	install -Dm755 "$srcdir"/panther-extract-firmware \
+		-t "$pkgdir"/usr/libexec/
+	install -Dm644 "$srcdir"/panther-extract-firmware.service \
+		-t "$pkgdir"/usr/lib/systemd/system/
+	install -Dm644 "$srcdir"/80-device-google-panther.preset \
+		-t "$pkgdir"/usr/lib/systemd/system-preset/
+	install -Dm755 "$srcdir"/panther-extract-firmware.initd \
+		"$pkgdir"/etc/init.d/panther-extract-firmware
+}
+
+openrc() {
+	default_openrc
 }
 sha512sums="
 2188d1aaadb83fb731f1bd212b691f31cb9dd3f6048e98854cfb3a6107d0fec6b256a9d1333dba048bf16fc81ad962dfe4f906d5301a75e7474d89e48bd8dc5c  deviceinfo
 b39e37285b631aae036edfb5946c6b1fc3183373bbe922543620341d4c71612ae32c252e2dc32d2e900704f8df0cd254a5070c08024c4c00286432ba0e721c09  kernel-cmdline.conf
 a5171dc7a4221a5a63c02820bac1e372c557cee72db9f777099f67eb272595fad6019f876cb47dd1bf455eeb3a45a74f215f2e8c44a6e1bf7cf3d7d9f49d98ad  modules-initfs
 dfbd95a636883fdc6066c80b403c69323c7a9197a0bfc4e387cd80d548949ff521366e075f69dade1a1d3c76bb5c1b8a62032f26556b84c57d2940884d5204f8  disable-suspend.conf
+93e229e9f0c9d2e5a5bacebbd0d500a81a8c651e61cff855d394f5f00e19fa19b4d8f1a2e7561fb5682f53c6c424aa82bfa71266ff7ddc2a83d37e4cfc20ff25  panther-extract-firmware
+245fd364f8b1ad71c08616428a1873bdb9b0e8ddf61383148ed7b3bcd64078bf3c682e3efead8d9e8de79bf888e154b2f5e337640c2f3866faef37882c672eb9  panther-extract-firmware.service
+7d3d208c621886c60d3df93e454e0f407f3c17772c1e991e0a6f9e0f0c41dedcdded9bb189e94526b04741c3e62447522e5b86fccc7b6c09ff342775abacf725  panther-extract-firmware.initd
+72a75e746133e82ca7469d942fe8a38206424ec5e75f869be9194e652579ec3e78307296dfd505e8802fcd20dd67149433155fc16ce4ff5a400f8c77f3b2b57d  80-device-google-panther.preset
 "

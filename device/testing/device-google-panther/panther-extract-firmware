@@ -1,0 +1,171 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: MIT
+"""
+Copy proprietary firmware that can't be redistributed from the phone's own
+Android vendor partition (inside the dynamic 'super' partition).
+"""
+import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+
+SUPER = "/dev/disk/by-partlabel/super"
+DEST = "/lib/firmware/updates"
+# (path in vendor partition, path relative to DEST)
+FILES = [
+    ("firmware/brcm/BCM.hcd", "brcm/BCM4389C1.google,gs201-panther.hcd"),
+]
+
+LP_GEOMETRY_MAGIC = 0x616C4467
+LP_HEADER_MAGIC = 0x414C5030
+LP_RESERVED = 4096
+LP_GEOMETRY_SIZE = 4096
+LP_TARGET_TYPE_LINEAR = 0
+
+
+def log(msg):
+    print(f"panther-extract-firmware: {msg}", file=sys.stderr)
+
+
+def read_lp_partitions(dev):
+    with open(dev, "rb") as f:
+        f.seek(LP_RESERVED)
+        geo = f.read(LP_GEOMETRY_SIZE)
+        if struct.unpack_from("<I", geo, 0)[0] != LP_GEOMETRY_MAGIC:
+            raise RuntimeError("no LP geometry")
+
+        f.seek(LP_RESERVED + 2 * LP_GEOMETRY_SIZE)
+        hdr = f.read(256)
+        if struct.unpack_from("<I", hdr, 0)[0] != LP_HEADER_MAGIC:
+            raise RuntimeError("no LP metadata header")
+        hdr_size = struct.unpack_from("<I", hdr, 8)[0]
+        tables_size = struct.unpack_from("<I", hdr, 44)[0]
+        desc = [struct.unpack_from("<III", hdr, 80 + i * 12) for i in range(2)]
+        f.seek(LP_RESERVED + 2 * LP_GEOMETRY_SIZE + hdr_size)
+        tables = f.read(tables_size)
+
+    (p_off, p_num, p_sz), (e_off, e_num, e_sz) = desc
+    extents = [struct.unpack_from("<QIQI", tables, e_off + i * e_sz)
+               for i in range(e_num)]
+    parts = {}
+    for i in range(p_num):
+        ent = tables[p_off + i * p_sz:p_off + (i + 1) * p_sz]
+        name = ent[:36].split(b"\0")[0].decode()
+        first, num = struct.unpack_from("<II", ent, 40)
+        parts[name] = extents[first:first + num]
+    return parts
+
+
+def slot_order():
+    for src in ("/proc/bootconfig", "/proc/cmdline"):
+        try:
+            text = open(src).read()
+        except OSError:
+            continue
+        for tok in text.replace("\n", " ").split():
+            if "slot_suffix" in tok and "=" in tok:
+                suffix = tok.split("=", 1)[1].strip('"')
+                if suffix in ("_a", "_b"):
+                    other = "_b" if suffix == "_a" else "_a"
+                    return [suffix, other]
+    return ["_a", "_b"]
+
+
+def map_partition(name, extents, superdev):
+    """Create a read-only dm-linear device covering the partition."""
+    table = []
+    start = 0
+    for num_sectors, target_type, target_data, target_source in extents:
+        if target_type != LP_TARGET_TYPE_LINEAR or target_source != 0:
+            raise RuntimeError(f"{name}: unsupported extent type")
+        table.append(f"{start} {num_sectors} linear {superdev} {target_data}")
+        start += num_sectors
+    dm_name = f"panther-fw-{name}"
+    subprocess.run(["dmsetup", "create", "--readonly", dm_name],
+                   input="\n".join(table) + "\n", text=True, check=True)
+    return dm_name
+
+
+def extract_from(name, extents, superdev):
+    dm_name = map_partition(name, extents, superdev)
+    mnt = tempfile.mkdtemp(prefix="panther-fw-")
+    copied = 0
+    try:
+        subprocess.run(["mount", "-t", "ext4", "-o", "ro,noload",
+                        f"/dev/mapper/{dm_name}", mnt], check=True)
+        try:
+            for src, dst in FILES:
+                src_path = os.path.join(mnt, src)
+                if not os.path.isfile(src_path):
+                    log(f"{name}: missing {src}")
+                    continue
+                dst_path = os.path.join(DEST, dst)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                shutil.copyfile(src_path, dst_path + ".tmp")
+                os.chmod(dst_path + ".tmp", 0o644)
+                os.replace(dst_path + ".tmp", dst_path)
+                log(f"{name}: {src} -> {dst_path}")
+                copied += 1
+        finally:
+            subprocess.run(["umount", mnt], check=False)
+    finally:
+        os.rmdir(mnt)
+        subprocess.run(["dmsetup", "remove", dm_name], check=False)
+    return copied
+
+
+def find_super():
+    if os.path.exists(SUPER):
+        return os.path.realpath(SUPER)
+    # udev may not have created by-partlabel links yet
+    for blk in os.listdir("/sys/class/block"):
+        try:
+            with open(f"/sys/class/block/{blk}/uevent") as f:
+                if "PARTNAME=super\n" in f.read():
+                    return f"/dev/{blk}"
+        except OSError:
+            pass
+    return None
+
+
+def rebind_bluetooth():
+    # hci_uart probes before this runs on first boot, so retry the firmware
+    drv = "/sys/bus/serial/drivers/hci_uart_bcm"
+    if not os.path.isdir(drv):
+        return
+    for dev in os.listdir(drv):
+        if dev.startswith("serial"):
+            with open(f"{drv}/unbind", "w") as f:
+                f.write(dev)
+            with open(f"{drv}/bind", "w") as f:
+                f.write(dev)
+
+
+def main():
+    if all(os.path.isfile(os.path.join(DEST, d)) for _, d in FILES):
+        return 0
+
+    superdev = find_super()
+    if not superdev:
+        log("super partition not found")
+        return 1
+
+    parts = read_lp_partitions(superdev)
+    for suffix in slot_order():
+        name = f"vendor{suffix}"
+        if not parts.get(name):
+            continue
+        try:
+            if extract_from(name, parts[name], superdev) == len(FILES):
+                rebind_bluetooth()
+                return 0
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            log(f"{name}: {e}")
+    log("firmware not found in any vendor partition")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -11,10 +11,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..4a518612c
+index 000000000..be0cebaa0
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,450 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -430,6 +430,40 @@ index 000000000..4a518612c
 +
 +&gpu {
 +	status = "okay";
++};
++
++&usi_apm1 {
++	status = "okay";
++};
++
++/* Broadcom BCM4389 Bluetooth (downstream "goog,nitrous" on serial_18) */
++&serial_18 {
++	status = "okay";
++
++	bluetooth {
++		compatible = "brcm,bcm4389-bt";
++		shutdown-gpios = <&gpp16 2 GPIO_ACTIVE_HIGH>;
++		device-wakeup-gpios = <&gpp16 3 GPIO_ACTIVE_HIGH>;
++		pinctrl-0 = <&bt_reg_on>, <&bt_dev_wake>;
++		pinctrl-names = "default";
++		max-speed = <3000000>;
++	};
++};
++
++&pinctrl_peric0 {
++	bt_reg_on: bt-reg-on-pins {
++		samsung,pins = "gpp16-2";
++		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	bt_dev_wake: bt-dev-wake-pins {
++		samsung,pins = "gpp16-3";
++		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
 +};
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-pinctrl.dtsi b/arch/arm64/boot/dts/exynos/google/gs201-pinctrl.dtsi
 new file mode 100644
@@ -885,10 +919,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..c5bd13758
+index 000000000..46c0a890c
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1175 @@
+@@ -0,0 +1,1223 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -917,6 +951,8 @@ index 000000000..c5bd13758
 +	interrupt-parent = <&gic>;
 +
 +	aliases {
++		/* in range of SERIAL_SAMSUNG_UARTS and off the ttySAC0 console */
++		serial1 = &serial_18;
 +		pinctrl0 = &pinctrl_gpio_alive;
 +		pinctrl1 = &pinctrl_far_alive;
 +		pinctrl2 = &pinctrl_gsacore;
@@ -1918,6 +1954,44 @@ index 000000000..c5bd13758
 +			clock-names = "oscclk";
 +		};
 +
++		sysreg_apm: syscon@18020000 {
++			compatible = "google,gs201-apm-sysreg", "syscon";
++			reg = <0x18020000 0x1000>;
++		};
++
++		/* APM USI1 (downstream serial_18): Bluetooth UART */
++		usi_apm1: usi@181b00c0 {
++			compatible = "google,gs201-usi", "google,gs101-usi",
++				     "samsung,exynos850-usi";
++			reg = <0x181b00c0 0x20>;
++			ranges;
++			#address-cells = <1>;
++			#size-cells = <1>;
++			clocks = <&cmu_apm CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK>,
++				 <&cmu_apm CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK>;
++			clock-names = "pclk", "ipclk";
++			samsung,sysreg = <&sysreg_apm 0x4e4>;
++			samsung,mode = <USI_MODE_UART>;
++			/* UART RX stalls when HWACG gates the idle IP clock */
++			samsung,clkreq-on;
++
++			status = "disabled";
++
++			serial_18: serial@181b0000 {
++				compatible = "google,gs201-uart", "google,gs101-uart";
++				reg = <0x181b0000 0xc0>;
++				clocks = <&cmu_apm CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK>,
++					 <&cmu_apm CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK>;
++				clock-names = "uart", "clk_uart_baud0";
++				interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
++				pinctrl-0 = <&uart18_bus>;
++				pinctrl-names = "default";
++				samsung,uart-fifosize = <256>;
++
++				status = "disabled";
++			};
++		};
++
 +		/* AP <-> APM (ACPM firmware) mailbox, same IP as gs101 */
 +		ap2apm_mailbox: mailbox@18210000 {
 +			compatible = "google,gs201-mbox", "google,gs101-mbox";
@@ -2031,6 +2105,14 @@ index 000000000..c5bd13758
 +
 +#include "gs201-pinctrl.dtsi"
 +
++&pinctrl_gpio_alive {
++	uart18_bus: uart18-bus-pins {
++		samsung,pins = "gpa3-0", "gpa3-1", "gpa3-2", "gpa3-3";
++		samsung,pin-function = <GS101_PIN_FUNC_2>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++	};
++};
++
 +&pinctrl_peric1 {
 +	hsi2c13_bus: hsi2c13-bus-pins {
 +		samsung,pins = "gpp25-0", "gpp25-1";
@@ -2064,6 +2146,104 @@ index 000000000..c5bd13758
 +		samsung,pin-pud-pdn = <GS101_PIN_PULL_NONE>;
 +	};
 +};
+diff --git a/drivers/bluetooth/btbcm.c b/drivers/bluetooth/btbcm.c
+index 463d59890..d267d869f 100644
+--- a/drivers/bluetooth/btbcm.c
++++ b/drivers/bluetooth/btbcm.c
+@@ -208,7 +208,28 @@ int btbcm_write_pcm_int_params(struct hci_dev *hdev,
+ }
+ EXPORT_SYMBOL_GPL(btbcm_write_pcm_int_params);
+ 
+-int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
++/* Send a command without waiting for (or expecting) a completion event */
++static int btbcm_send_raw_cmd(struct hci_dev *hdev, u16 opcode, u8 plen,
++			      const void *param)
++{
++	struct hci_command_hdr *hdr;
++	struct sk_buff *skb;
++
++	skb = bt_skb_alloc(HCI_COMMAND_HDR_SIZE + plen, GFP_KERNEL);
++	if (!skb)
++		return -ENOMEM;
++
++	hdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);
++	hdr->opcode = cpu_to_le16(opcode);
++	hdr->plen = plen;
++	skb_put_data(skb, param, plen);
++	hci_skb_pkt_type(skb) = HCI_COMMAND_PKT;
++
++	return hdev->send(hdev, skb);
++}
++
++static int __btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw,
++			    bool stream)
+ {
+ 	const struct hci_command_hdr *cmd;
+ 	const u8 *fw_ptr;
+@@ -251,6 +272,21 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
+ 
+ 		opcode = le16_to_cpu(cmd->opcode);
+ 
++		/*
++		 * Some controllers' minidrivers never acknowledge Write RAM
++		 * commands, so the patch has to be streamed until Launch RAM.
++		 */
++		if (stream && opcode == 0xfc4c) {
++			err = btbcm_send_raw_cmd(hdev, opcode, cmd->plen,
++						 cmd_param);
++			if (err) {
++				bt_dev_err(hdev, "BCM: Patch write failed (%d)",
++					   err);
++				return err;
++			}
++			continue;
++		}
++
+ 		skb = __hci_cmd_sync(hdev, opcode, cmd->plen, cmd_param,
+ 				     HCI_INIT_TIMEOUT);
+ 		if (IS_ERR(skb)) {
+@@ -267,6 +303,11 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
+ 
+ 	return 0;
+ }
++
++int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
++{
++	return __btbcm_patchram(hdev, fw, false);
++}
+ EXPORT_SYMBOL(btbcm_patchram);
+ 
+ static int btbcm_reset(struct hci_dev *hdev)
+@@ -514,6 +555,7 @@ static const struct bcm_subver_table bcm_uart_subver_table[] = {
+ 	{ 0x4106, "BCM4335A0"	},	/* 002.001.006 */
+ 	{ 0x410c, "BCM43430B0"	},	/* 002.001.012 */
+ 	{ 0x2119, "BCM4373A0"	},	/* 001.001.025 */
++	{ 0x6209, "BCM4389C1"	},	/* 003.002.009 */
+ 	{ }
+ };
+ 
+@@ -678,7 +720,8 @@ int btbcm_initialize(struct hci_dev *hdev, bool *fw_load_done, bool use_autobaud
+ 	}
+ 
+ 	if (*fw_load_done) {
+-		err = btbcm_patchram(hdev, fw);
++		/* BCM4389C1 doesn't acknowledge Write RAM commands */
++		err = __btbcm_patchram(hdev, fw, subver == 0x6209);
+ 		if (err)
+ 			bt_dev_info(hdev, "BCM: Patch failed (%d)", err);
+ 
+diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
+index 9a103db7e..facbe96c3 100644
+--- a/drivers/bluetooth/hci_bcm.c
++++ b/drivers/bluetooth/hci_bcm.c
+@@ -1591,6 +1591,7 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
+ 	{ .compatible = "brcm,bcm43430a1-bt" },
+ 	{ .compatible = "brcm,bcm43438-bt", .data = &bcm43438_device_data },
+ 	{ .compatible = "brcm,bcm4349-bt", .data = &bcm43438_device_data },
++	{ .compatible = "brcm,bcm4389-bt" },
+ 	{ .compatible = "brcm,bcm43540-bt", .data = &bcm4354_device_data },
+ 	{ .compatible = "brcm,bcm4335a0" },
+ 	{ .compatible = "cypress,cyw4373a0-bt", .data = &cyw4373a0_device_data },
 diff --git a/drivers/clk/samsung/Makefile b/drivers/clk/samsung/Makefile
 index b3c4ef4e0..32a269e25 100644
 --- a/drivers/clk/samsung/Makefile
@@ -2078,10 +2258,10 @@ index b3c4ef4e0..32a269e25 100644
  obj-$(CONFIG_S5PV210_COMMON_CLK)	+= clk-s5pv210.o clk-s5pv210-audss.o
 diff --git a/drivers/clk/samsung/clk-gs201.c b/drivers/clk/samsung/clk-gs201.c
 new file mode 100644
-index 000000000..bcd3db068
+index 000000000..44f49a265
 --- /dev/null
 +++ b/drivers/clk/samsung/clk-gs201.c
-@@ -0,0 +1,458 @@
+@@ -0,0 +1,472 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Minimal Google gs201 (Tensor G2) clock support.
@@ -2197,7 +2377,10 @@ index 000000000..bcd3db068
 +/* CMU_APM */
 +#define CLK_CON_MUX_MUX_CLKCMU_APM_FUNC	0x1000
 +#define CLK_CON_MUX_MUX_CLKCMU_APM_FUNCSRC	0x1004
++#define CLK_CON_DIV_DIV_CLK_APM_USI1_UART	0x1814
 +#define CLK_CON_GAT_GATE_CLKCMU_APM_FUNC	0x2084
++#define CLK_CON_GAT_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK	0x20ac
++#define CLK_CON_GAT_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK	0x20b0
 +#define CLK_CON_GAT_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK	0x20d4
 +
 +PNAME(mux_clkcmu_hsi2_noc_p) = { "pll_shared0_div4", "pll_shared1_div4", "pll_shared2_div2", "pll_shared3_div2", "mout_pll_spare", "oscclk", "oscclk", "oscclk" };
@@ -2517,11 +2700,20 @@ index 000000000..bcd3db068
 +	    CLK_CON_MUX_MUX_CLKCMU_APM_FUNCSRC, 0, 2),
 +};
 +
++static const struct samsung_div_clock apm_div_clks[] __initconst = {
++	DIV(CLK_GS201_DIV_CLK_APM_USI1_UART, "div_clk_apm_usi1_uart", "gate_clkcmu_apm_func",
++	    CLK_CON_DIV_DIV_CLK_APM_USI1_UART, 0, 7),
++};
++
 +static const struct samsung_gate_clock apm_gate_clks[] __initconst = {
 +	GATE(CLK_GS201_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK, "gout_blk_apm_uid_mailbox_apm_ap_ipclkport_pclk", "gate_clkcmu_apm_func",
 +	     CLK_CON_GAT_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
 +	GATE(CLK_GS201_GATE_CLKCMU_APM_FUNC, "gate_clkcmu_apm_func", "mux_clkcmu_apm_func",
 +	     CLK_CON_GAT_GATE_CLKCMU_APM_FUNC, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK, "gout_blk_apm_uid_apm_usi1_uart_ipclkport_pclk", "gate_clkcmu_apm_func",
++	     CLK_CON_GAT_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK, "gout_blk_apm_uid_apm_usi1_uart_ipclkport_ipclk", "div_clk_apm_usi1_uart",
++	     CLK_CON_GAT_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK, 21, CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT, 0),
 +};
 +
 +static const struct samsung_cmu_info apm_cmu_info __initconst = {
@@ -2529,9 +2721,11 @@ index 000000000..bcd3db068
 +	.nr_fixed_clks	= ARRAY_SIZE(apm_fixed_clks),
 +	.mux_clks		= apm_mux_clks,
 +	.nr_mux_clks	= ARRAY_SIZE(apm_mux_clks),
++	.div_clks		= apm_div_clks,
++	.nr_div_clks	= ARRAY_SIZE(apm_div_clks),
 +	.gate_clks		= apm_gate_clks,
 +	.nr_gate_clks	= ARRAY_SIZE(apm_gate_clks),
-+	.nr_clk_ids		= 10,
++	.nr_clk_ids		= 13,
 +};
 +
 +static void __init gs201_cmu_apm_init(struct device_node *np)
@@ -4445,10 +4639,10 @@ index f3dabb37f..a00e359f1 100644
  	unsigned		sys_wakeup:1;
 diff --git a/include/dt-bindings/clock/google,gs201.h b/include/dt-bindings/clock/google,gs201.h
 new file mode 100644
-index 000000000..394e38179
+index 000000000..b57c09bcc
 --- /dev/null
 +++ b/include/dt-bindings/clock/google,gs201.h
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,110 @@
 +/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
 +/*
 + * Minimal gs201 clock IDs, generated from Google's gs201 CAL data.
@@ -4554,6 +4748,9 @@ index 000000000..394e38179
 +#define CLK_GS201_PLL_ALV_DIV16_APM	7
 +#define CLK_GS201_PLL_ALV_DIV8_APM	8
 +#define CLK_GS201_PAD_CLK_APM	9
++#define CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_PCLK	10
++#define CLK_GS201_GOUT_BLK_APM_UID_APM_USI1_UART_IPCLKPORT_IPCLK	11
++#define CLK_GS201_DIV_CLK_APM_USI1_UART	12
 +
 +#endif
 diff --git a/include/linux/mfd/samsung/core.h b/include/linux/mfd/samsung/core.h

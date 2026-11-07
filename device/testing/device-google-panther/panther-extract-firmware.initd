@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+
+description="Extract Pixel 7 firmware from the Android vendor partition"
+
+depend() {
+	need localmount
+	before bluetooth
+}
+
+start() {
+	ebegin "Extracting Pixel 7 firmware"
+	/usr/libexec/panther-extract-firmware
+	eend $?
+}
