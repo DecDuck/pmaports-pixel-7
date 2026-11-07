@@ -2639,7 +2639,7 @@ index 46a3080b0..1978067c4 100644
  	case DRM_PANTHOR_DEV_QUERY_CSIF_INFO:
  		return PANTHOR_UOBJ_SET(args->pointer, args->size, ptdev->csif_info);
 diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
-index 21ddf4502..68f91880e 100644
+index 21ddf4502..7789aafa4 100644
 --- a/drivers/gpu/drm/sysfb/simpledrm.c
 +++ b/drivers/gpu/drm/sysfb/simpledrm.c
 @@ -9,6 +9,7 @@
@@ -2699,7 +2699,37 @@ index 21ddf4502..68f91880e 100644
  };
  
  static const struct drm_plane_funcs simpledrm_primary_plane_funcs = {
-@@ -927,6 +967,13 @@ static int simpledrm_probe(struct platform_device *pdev)
+@@ -624,6 +664,7 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 	int width, height, stride;
+ 	u16 width_mm = 0, height_mm = 0;
+ 	struct device_node *panel_node;
++	int connector_type = DRM_MODE_CONNECTOR_Unknown;
+ 	enum drm_panel_orientation orientation = DRM_MODE_PANEL_ORIENTATION_UNKNOWN;
+ 	const struct drm_format_info *format;
+ 	u64 size;
+@@ -688,6 +729,12 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 			return ERR_CAST(mem);
+ 		panel_node = of_parse_phandle(of_node, "panel", 0);
+ 		if (panel_node) {
++			/*
++			 * A linked panel means a built-in display. Report it
++			 * as DSI (what these handheld panels are) rather than
++			 * Unknown, so userspace treats it as the internal panel.
++			 */
++			connector_type = DRM_MODE_CONNECTOR_DSI;
+ 			/*
+ 			 * Ignore errors from parsing the physical panel
+ 			 * size. Using the pre-initialized sizes of 0 will
+@@ -865,7 +912,7 @@ static struct simpledrm_device *simpledrm_device_create(struct drm_driver *drv,
+ 
+ 	connector = &sdev->connector;
+ 	ret = drm_connector_init(dev, connector, &simpledrm_connector_funcs,
+-				 DRM_MODE_CONNECTOR_Unknown);
++				 connector_type);
+ 	if (ret)
+ 		return ERR_PTR(ret);
+ 	drm_connector_helper_add(connector, &simpledrm_connector_helper_funcs);
+@@ -927,6 +974,13 @@ static int simpledrm_probe(struct platform_device *pdev)
  	struct drm_device *dev;
  	int ret;
  
