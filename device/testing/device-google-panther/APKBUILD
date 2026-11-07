@@ -1,0 +1,43 @@
+# Reference: <https://nura.eco/devicepkg>
+maintainer=""
+pkgname=device-google-panther
+pkgver=1
+pkgrel=17
+pkgdesc="Google Pixel 7"
+url="https://nura.eco"
+arch="aarch64"
+license="MIT"
+depends="
+	android-tools
+	linux-firmware-arm
+	linux-postmarketos-gs201
+	postmarketos-base
+	soc-google-gs201
+	"
+makedepends="devicepkg-dev"
+source="
+	deviceinfo
+	kernel-cmdline.conf
+	modules-initfs
+	disable-suspend.conf
+	"
+options="!archcheck !check"
+
+build() {
+	devicepkg_build $startdir $pkgname
+}
+
+package() {
+	devicepkg_package $startdir $pkgname
+
+	install -Dm644 "$srcdir"/disable-suspend.conf \
+		"$pkgdir"/usr/lib/systemd/sleep.conf.d/50-panther-disable-suspend.conf
+	install -Dm644 "$srcdir"/disable-suspend.conf \
+		"$pkgdir"/usr/lib/elogind/sleep.conf.d/50-panther-disable-suspend.conf
+}
+sha512sums="
+2188d1aaadb83fb731f1bd212b691f31cb9dd3f6048e98854cfb3a6107d0fec6b256a9d1333dba048bf16fc81ad962dfe4f906d5301a75e7474d89e48bd8dc5c  deviceinfo
+b39e37285b631aae036edfb5946c6b1fc3183373bbe922543620341d4c71612ae32c252e2dc32d2e900704f8df0cd254a5070c08024c4c00286432ba0e721c09  kernel-cmdline.conf
+a5171dc7a4221a5a63c02820bac1e372c557cee72db9f777099f67eb272595fad6019f876cb47dd1bf455eeb3a45a74f215f2e8c44a6e1bf7cf3d7d9f49d98ad  modules-initfs
+dfbd95a636883fdc6066c80b403c69323c7a9197a0bfc4e387cd80d548949ff521366e075f69dade1a1d3c76bb5c1b8a62032f26556b84c57d2940884d5204f8  disable-suspend.conf
+"

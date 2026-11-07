@@ -1,0 +1,76 @@
+maintainer=""
+pkgname=linux-postmarketos-gs201
+pkgver=7.3_rc6
+pkgrel=12
+pkgdesc="Google gs201 (Pixel 7 Series) close-to-mainline kernel"
+arch="aarch64"
+_carch="arm64"
+_flavor="postmarketos-gs201"
+url="https://kernel.org"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps pmb:cross-native pmb:kconfigcheck-community"
+makedepends="
+	bison
+	clang
+	elfutils-dev
+	findutils
+	flex
+	linux-headers
+	lld
+	llvm
+	lz4
+	openssl-dev
+	pahole
+	perl
+	python3
+	zstd
+"
+
+# Based on linux-postmarketos-gs101 with a minimal gs201-panther DT on top.
+# Source
+_commit="e8f42849a581ea8e915ad0f10c25951e696dc6b5"
+_config="config-$_flavor.$arch"
+source="
+	linux-postmarketos-gs101-$_commit.tar.gz::https://gitlab.postmarketos.org/soc/tensor-exynos/linux/-/archive/$_commit/linux-$_commit.tar.gz
+	$_config
+	0001-gs201-panther-bringup.patch
+"
+builddir="$srcdir/linux-$_commit"
+_outdir=".output"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$CARCH" .config
+}
+
+build() {
+	unset LDFLAGS
+	make all Image.lz4 ARCH="$_carch" LLVM=1 \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1 ))-postmarketOS"
+}
+
+package() {
+	install -Dm644 "$builddir/arch/$_carch/boot/vmlinuz.efi" \
+		"$pkgdir/boot/linux.efi"
+
+	install -Dm644 "$builddir/arch/$_carch/boot/Image.lz4" \
+		"$pkgdir/boot/vmlinuz"
+
+	make modules_install dtbs_install \
+		ARCH="$_carch" \
+		LLVM=1 \
+		INSTALL_PATH="$pkgdir"/boot \
+		INSTALL_MOD_PATH="$pkgdir"/usr \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir"/boot/dtbs
+	rm -f "$pkgdir"/usr/lib/modules/*/build "$pkgdir"/usr/lib/modules/*/source
+
+	install -Dm644 "$builddir"/include/config/kernel.release \
+		"$pkgdir"/usr/share/kernel/$_flavor/kernel.release
+}
+
+sha512sums="
+10dde8872a1d917254bd713ac3aba7fd288cb4d6ae0c2475b7eb33a055826e67dbe9939e0c38822118d6a62a1761e2b40fcf13a83afd25bde1a58ffd3c772320  linux-postmarketos-gs101-e8f42849a581ea8e915ad0f10c25951e696dc6b5.tar.gz
+b276678736acbbf03b58c2983e5b53696273a5dc359618431bfdcd2e62f8aec74d8c02d9dbc850b2bbe60a1c17fb878f362d94a9758a5e2571f988d470e978f8  config-postmarketos-gs201.aarch64
+8c719a3a1c485b9c468c5dd5723e512743f2871bc46b27de68d6dc86dc9395f9524c3487819a068eacc6b8313f8ebeb4b3e1ccf90bf7df425fafa10f840b9628  0001-gs201-panther-bringup.patch
+"

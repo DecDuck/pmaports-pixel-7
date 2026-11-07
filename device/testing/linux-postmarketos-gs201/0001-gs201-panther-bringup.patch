@@ -1,0 +1,4540 @@
+diff --git a/arch/arm64/boot/dts/exynos/google/Makefile b/arch/arm64/boot/dts/exynos/google/Makefile
+index 93c824908..c68dc8c42 100644
+--- a/arch/arm64/boot/dts/exynos/google/Makefile
++++ b/arch/arm64/boot/dts/exynos/google/Makefile
+@@ -3,4 +3,5 @@
+ dtb-$(CONFIG_ARCH_EXYNOS) += \
+ 	gs101-oriole.dtb \
+ 	gs101-raven.dtb \
+-	gs101-bluejay.dtb
++	gs101-bluejay.dtb \
++	gs201-panther.dtb
+diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
+new file mode 100644
+index 000000000..4a518612c
+--- /dev/null
++++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
+@@ -0,0 +1,416 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Google Pixel 7 (panther)
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/input/linux-event-codes.h>
++#include <dt-bindings/usb/pd.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "gs201.dtsi"
++
++/ {
++	model = "Google Pixel 7";
++	compatible = "google,gs201-panther", "google,gs201";
++
++	/* TODO: replace with PMIC regulators once supported (as gs101-pixel-common) */
++	reg_placeholder: regulator-placeholder {
++		compatible = "regulator-fixed";
++		regulator-name = "placeholder_reg";
++	};
++
++	/* gpp0-1 per downstream gs201-ufs.dtsi; replace once the PMIC is supported */
++	ufs_0_fixed_vcc_reg: regulator-ufs-vcc {
++		compatible = "regulator-fixed";
++		regulator-name = "ufs-vcc";
++		gpio = <&gpp0 1 GPIO_ACTIVE_HIGH>;
++		regulator-boot-on;
++		enable-active-high;
++	};
++
++	gpio-keys {
++		compatible = "gpio-keys";
++		pinctrl-0 = <&key_voldown>, <&key_volup>, <&key_power>;
++		pinctrl-names = "default";
++
++		button-vol-down {
++			label = "KEY_VOLUMEDOWN";
++			linux,code = <KEY_VOLUMEDOWN>;
++			gpios = <&gpa10 1 GPIO_ACTIVE_LOW>;
++			wakeup-source;
++		};
++
++		button-vol-up {
++			label = "KEY_VOLUMEUP";
++			linux,code = <KEY_VOLUMEUP>;
++			gpios = <&gpa8 5 GPIO_ACTIVE_LOW>;
++			wakeup-source;
++		};
++
++		/* PMIC_PWRON_OD_L: S2MPG12 power key output */
++		button-power {
++			label = "KEY_POWER";
++			linux,code = <KEY_POWER>;
++			gpios = <&gpa10 0 GPIO_ACTIVE_LOW>;
++			wakeup-source;
++		};
++	};
++
++	/*
++	 * Physical size of the S6E3FC3 panel (6.3", 1080x2400 @ ~416ppi) for
++	 * simpledrm, so compositors pick a sensible scale. No panel driver yet.
++	 */
++	panel: panel {
++		width-mm = <66>;
++		height-mm = <147>;
++		/* not a device: keeps fw_devlink from deferring simpledrm on it */
++		status = "disabled";
++	};
++
++	chosen {
++		/* Bootloader expects bootargs to exist, otherwise it crashes */
++		bootargs = "";
++		#address-cells = <2>;
++		#size-cells = <1>;
++		ranges;
++
++		framebuffer0: framebuffer-0 {
++			compatible = "simple-framebuffer";
++			memory-region = <&cont_splash_mem>;
++			panel = <&panel>;
++			width = <1080>;
++			height = <2400>;
++			stride = <(1080 * 4)>;
++			format = "a8r8g8b8";
++		};
++	};
++};
++
++&reserved_memory {
++	cont_splash_mem: splash@fac00000 {
++		reg = <0x0 0xfac00000 (1080 * 2400 * 4)>;
++		no-map;
++	};
++};
++
++&ufs_0 {
++	vcc-supply = <&ufs_0_fixed_vcc_reg>;
++
++	status = "okay";
++};
++
++&ufs_0_phy {
++	status = "okay";
++};
++
++&usbdrd31 {
++	vdd10-supply = <&reg_placeholder>;
++	vdd33-supply = <&reg_placeholder>;
++
++	status = "okay";
++};
++
++&usbdrd31_dwc3 {
++	dr_mode = "otg";
++	usb-role-switch;
++	role-switch-default-mode = "peripheral";
++	maximum-speed = "super-speed-plus";
++	/* gadget doesn't enumerate after host mode without a full core reinit */
++	snps,reinit-on-host-exit;
++
++	status = "okay";
++
++	port {
++		usbdrd31_dwc3_role_switch: endpoint {
++			remote-endpoint = <&usbc0_role_sw>;
++		};
++	};
++};
++
++&usbdrd31_phy {
++	orientation-switch;
++	pll-supply = <&s2mpg12_ldo8m>;
++	dvdd-usb20-supply = <&s2mpg12_ldo8m>;
++	vddh-usb20-supply = <&s2mpg12_ldo9m>;
++	vdd33-usb20-supply = <&s2mpg12_ldo10m>;
++	vdda-usbdp-supply = <&s2mpg12_ldo8m>;
++	vddh-usbdp-supply = <&s2mpg12_ldo9m>;
++
++	status = "okay";
++
++	port {
++		usbdrd31_phy_orien_switch: endpoint {
++			remote-endpoint = <&usbc0_orien_sw>;
++		};
++	};
++};
++
++/*
++ * The touch SPI bus is muxed between the AP and the AOC coprocessor by
++ * gph1-0 (low: AP). Nothing runs on the AOC, so keep it on the AP.
++ */
++&gph1 {
++	touch-spi-sel-hog {
++		gpio-hog;
++		gpios = <0 GPIO_ACTIVE_HIGH>;
++		output-low;
++		line-name = "ts-spi-sel-ap";
++	};
++};
++
++&pinctrl_far_alive {
++	key_volup: key-volup-pins {
++		samsung,pins = "gpa8-5";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	ts_irq: ts-irq-pins {
++		samsung,pins = "gpa7-0";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++};
++
++&pinctrl_peric1 {
++	ts_reset: ts-reset-pins {
++		samsung,pins = "gpp23-2";
++		samsung,pin-function = <GS101_PIN_FUNC_OUTPUT>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++	};
++};
++
++&usi0 {
++	samsung,mode = <USI_MODE_SPI>;
++
++	status = "okay";
++};
++
++&spi_0 {
++	cs-gpios = <&gpp20 3 GPIO_ACTIVE_LOW>;
++
++	status = "okay";
++
++	touchscreen@0 {
++		compatible = "focaltech,ft3658";
++		reg = <0>;
++		spi-max-frequency = <10000000>;
++
++		interrupt-parent = <&gpa7>;
++		interrupts = <0 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&gpp23 2 GPIO_ACTIVE_LOW>;
++		pinctrl-0 = <&ts_irq &ts_reset>;
++		pinctrl-names = "default";
++
++		vdd-supply = <&s2mpg12_ldo25m>;
++		avdd-supply = <&s2mpg12_ldo26m>;
++
++		touchscreen-size-x = <1080>;
++		touchscreen-size-y = <2400>;
++	};
++};
++
++&acpm_ipc {
++	/* S2MPG12 main PMIC: ACPM channel 2, speedy channel 0 */
++	pmic-1 {
++		compatible = "samsung,s2mpg12-pmic";
++		interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>;
++
++		regulators {
++			/* PP0850_L8M_USB: AVDD_PLL_USB, AVDD085_USB20, AVDD085_USBDP */
++			s2mpg12_ldo8m: ldo8m {
++				regulator-name = "vdd_usb_0p85";
++				regulator-always-on;
++			};
++
++			/* PP1800_L9M_USB: AVDD18_USB20, AVDD18_USBDP */
++			s2mpg12_ldo9m: ldo9m {
++				regulator-name = "vdd_usb_1p8";
++				regulator-always-on;
++			};
++
++			/* PP3000_L10M_USB: AVDD33_USB20 */
++			s2mpg12_ldo10m: ldo10m {
++				regulator-name = "vdd_usb_3p0";
++				regulator-always-on;
++			};
++
++			s2mpg12_ldo25m: ldo25m {
++				regulator-name = "vdd_ts_1p8";
++				regulator-min-microvolt = <1800000>;
++				regulator-max-microvolt = <1800000>;
++			};
++
++			s2mpg12_ldo26m: ldo26m {
++				regulator-name = "vdd_ts_3p3";
++				regulator-min-microvolt = <3300000>;
++				regulator-max-microvolt = <3300000>;
++			};
++		};
++	};
++};
++
++&pinctrl_gpio_alive {
++	if_pmic_fg_int: if-pmic-fg-int-pins {
++		samsung,pins = "gpa9-3";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	typec_int: typec-int-pins {
++		samsung,pins = "gpa9-7";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	if_pmic_int: if-pmic-int-pins {
++		samsung,pins = "gpa9-4";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	key_power: key-power-pins {
++		samsung,pins = "gpa10-0";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	key_voldown: key-voldown-pins {
++		samsung,pins = "gpa10-1";
++		samsung,pin-function = <GS101_PIN_FUNC_EINT>;
++		samsung,pin-pud = <GS101_PIN_PULL_UP>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++};
++
++&usi13 {
++	samsung,mode = <USI_MODE_I2C>;
++
++	status = "okay";
++};
++
++/* MAX77759 companion PMIC: charger, fuel gauge, Type-C (downstream hsi2c_13) */
++&hsi2c_13 {
++	clock-frequency = <400000>;
++
++	status = "okay";
++
++	usb-typec@25 {
++		compatible = "maxim,max77759-tcpci", "maxim,max33359";
++		reg = <0x25>;
++		interrupts-extended = <&gpa9 7 IRQ_TYPE_LEVEL_LOW>;
++		pinctrl-0 = <&typec_int>;
++		pinctrl-names = "default";
++
++		/* OTG power via MAX77759 reverse boost (up to 1.5A) */
++		vbus-supply = <&usb_otg_vbus>;
++
++		connector {
++			compatible = "usb-c-connector";
++			label = "USB-C";
++			data-role = "dual";
++			power-role = "dual";
++			try-power-role = "sink";
++			self-powered;
++			op-sink-microwatt = <2600000>;
++			slow-charger-loop;
++			source-pdos = <PDO_FIXED(5000, 900,
++						 (PDO_FIXED_SUSPEND
++						  | PDO_FIXED_USB_COMM
++						  | PDO_FIXED_DATA_SWAP
++						  | PDO_FIXED_DUAL_ROLE))>;
++			sink-pdos = <PDO_FIXED(5000, 3000,
++					       (PDO_FIXED_DATA_SWAP
++						| PDO_FIXED_USB_COMM
++						| PDO_FIXED_HIGHER_CAP
++						| PDO_FIXED_DUAL_ROLE))>;
++			/* as gs101: no PD until the bootloader/console setup allows it */
++			pd-disable;
++			typec-power-opmode = "default";
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@0 {
++					reg = <0>;
++
++					usbc0_orien_sw: endpoint {
++						remote-endpoint = <&usbdrd31_phy_orien_switch>;
++					};
++				};
++
++				port@1 {
++					reg = <1>;
++
++					usbc0_role_sw: endpoint {
++						remote-endpoint = <&usbdrd31_dwc3_role_switch>;
++					};
++				};
++			};
++		};
++	};
++
++	fuel-gauge@36 {
++		compatible = "maxim,max77759-fg";
++		reg = <0x36>;
++
++		pinctrl-0 = <&if_pmic_fg_int>;
++		pinctrl-names = "default";
++		interrupts-extended = <&gpa9 3 IRQ_TYPE_LEVEL_LOW>;
++
++		/* downstream maxim,rsense-default = <500> (10 uOhm units) */
++		shunt-resistor-micro-ohms = <5000>;
++	};
++
++	pmic@66 {
++		compatible = "maxim,max77759";
++		reg = <0x66>;
++
++		pinctrl-0 = <&if_pmic_int>;
++		pinctrl-names = "default";
++		interrupts-extended = <&gpa9 4 IRQ_TYPE_LEVEL_LOW>;
++
++		interrupt-controller;
++		#interrupt-cells = <2>;
++
++		usb_otg_vbus: chgin-otg-regulator {
++			regulator-name = "chgin-otg";
++		};
++
++		gpio {
++			compatible = "maxim,max77759-gpio";
++
++			gpio-controller;
++			#gpio-cells = <2>;
++
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++
++		nvmem-0 {
++			compatible = "maxim,max77759-nvmem";
++
++			nvmem-layout {
++				compatible = "fixed-layout";
++				#address-cells = <1>;
++				#size-cells = <1>;
++			};
++		};
++	};
++};
++
++&hsi2c13_bus {
++	samsung,pin-pud = <GS101_PIN_PULL_UP>;
++};
++
++&gpu {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/exynos/google/gs201-pinctrl.dtsi b/arch/arm64/boot/dts/exynos/google/gs201-pinctrl.dtsi
+new file mode 100644
+index 000000000..bf9201277
+--- /dev/null
++++ b/arch/arm64/boot/dts/exynos/google/gs201-pinctrl.dtsi
+@@ -0,0 +1,446 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * GS201 SoC GPIO banks. Generated from Google's downstream gs201
++ * pinctrl driver and device tree (kernel/google-modules/soc/gs,
++ * kernel/devices/google/gs201, android-gs-pantah-6.1-android16).
++ */
++
++&pinctrl_gpio_alive {
++	gpa0: gpa0-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa1: gpa1-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa2: gpa2-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa3: gpa3-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa4: gpa4-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 25 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa5: gpa5-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 29 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 30 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 31 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa9: gpa9-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa10: gpa10-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;
++	};
++};
++
++&pinctrl_far_alive {
++	gpa6: gpa6-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 46 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 47 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa7: gpa7-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa8: gpa8-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 62 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	gpa11: gpa11-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupt-parent = <&gic>;
++		interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>,
++			     <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
++	};
++};
++
++&pinctrl_gsacore {
++	gps0: gps0-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gps1: gps1-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gps2: gps2-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_gsactrl {
++	gps3: gps3-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_peric0 {
++	gpp0: gpp0-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp1: gpp1-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp2: gpp2-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp3: gpp3-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp4: gpp4-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp5: gpp5-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp6: gpp6-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp7: gpp7-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp8: gpp8-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp9: gpp9-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp10: gpp10-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp11: gpp11-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp12: gpp12-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp13: gpp13-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp14: gpp14-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp15: gpp15-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp16: gpp16-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp17: gpp17-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp18: gpp18-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp19: gpp19-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_peric1 {
++	gpp20: gpp20-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp21: gpp21-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp22: gpp22-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp23: gpp23-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp24: gpp24-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp25: gpp25-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp26: gpp26-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gpp27: gpp27-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_hsi1 {
++	gph0: gph0-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gph1: gph1-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_hsi2 {
++	gph2: gph2-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++
++	gph4: gph4-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
++&pinctrl_hsi2ufs {
++	gph3: gph3-gpio-bank {
++		gpio-controller;
++		#gpio-cells = <2>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++	};
++};
++
+diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
+new file mode 100644
+index 000000000..c5bd13758
+--- /dev/null
++++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
+@@ -0,0 +1,1175 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Google GS201 (Tensor G2) SoC - minimal mainline description.
++ *
++ * Addresses, interrupts and register data are taken from Google's downstream
++ * gs201 sources (kernel/devices/google/gs201 and kernel/google-modules/soc/gs,
++ * android-gs-pantah-6.1-android16). DRAM (/memory) is filled in by the
++ * bootloader.
++ *
++ * NOTE: the Android 16 bootloader takes the DTB from vendor_kernel_boot, not
++ * vendor_boot, and unpacks init_boot's ramdisk last; flash both accordingly.
++ */
++
++#include <dt-bindings/clock/google,gs101-acpm.h>
++#include <dt-bindings/clock/google,gs201.h>
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/soc/samsung,exynos-usi.h>
++#include <dt-bindings/thermal/thermal.h>
++#include "gs101-pinctrl.h"
++
++/ {
++	compatible = "google,gs201";
++	#address-cells = <2>;
++	#size-cells = <1>;
++	interrupt-parent = <&gic>;
++
++	aliases {
++		pinctrl0 = &pinctrl_gpio_alive;
++		pinctrl1 = &pinctrl_far_alive;
++		pinctrl2 = &pinctrl_gsacore;
++		pinctrl3 = &pinctrl_gsactrl;
++		pinctrl4 = &pinctrl_peric0;
++		pinctrl5 = &pinctrl_peric1;
++		pinctrl6 = &pinctrl_hsi1;
++		pinctrl7 = &pinctrl_hsi2;
++		pinctrl8 = &pinctrl_hsi2ufs;
++	};
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		cpu-map {
++			cluster0 {
++				core0 { cpu = <&cpu0>; };
++				core1 { cpu = <&cpu1>; };
++				core2 { cpu = <&cpu2>; };
++				core3 { cpu = <&cpu3>; };
++			};
++
++			cluster1 {
++				core0 { cpu = <&cpu4>; };
++				core1 { cpu = <&cpu5>; };
++			};
++
++			cluster2 {
++				core0 { cpu = <&cpu6>; };
++				core1 { cpu = <&cpu7>; };
++			};
++		};
++
++		cpu0: cpu@0 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a55";
++			reg = <0x0000>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl0_opp_table>;
++			capacity-dmips-mhz = <250>;
++		};
++
++		cpu1: cpu@100 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a55";
++			reg = <0x0100>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl0_opp_table>;
++			capacity-dmips-mhz = <250>;
++		};
++
++		cpu2: cpu@200 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a55";
++			reg = <0x0200>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl0_opp_table>;
++			capacity-dmips-mhz = <250>;
++		};
++
++		cpu3: cpu@300 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a55";
++			reg = <0x0300>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL0>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl0_opp_table>;
++			capacity-dmips-mhz = <250>;
++		};
++
++		cpu4: cpu@400 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a78";
++			reg = <0x0400>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl1_opp_table>;
++			capacity-dmips-mhz = <927>;
++		};
++
++		cpu5: cpu@500 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a78";
++			reg = <0x0500>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL1>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl1_opp_table>;
++			capacity-dmips-mhz = <927>;
++		};
++
++		cpu6: cpu@600 {
++			device_type = "cpu";
++			compatible = "arm,cortex-x1";
++			reg = <0x0600>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL2>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl2_opp_table>;
++			capacity-dmips-mhz = <1024>;
++		};
++
++		cpu7: cpu@700 {
++			device_type = "cpu";
++			compatible = "arm,cortex-x1";
++			reg = <0x0700>;
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_CPUCL2>;
++			enable-method = "psci";
++			#cooling-cells = <2>;
++			operating-points-v2 = <&cpucl2_opp_table>;
++			capacity-dmips-mhz = <1024>;
++		};
++	};
++
++	/*
++	 * Downstream throttles with a PID governor from 100C. With step_wise,
++	 * start at 80C and force a big step at 92C; power off at 110C.
++	 */
++	thermal-zones {
++		big-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&acpm_tmu 0>;
++
++			trips {
++				big_alert: trip-alert {
++					temperature = <80000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				big_emergency: trip-emergency {
++					temperature = <92000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				trip-hot {
++					temperature = <100000>;
++					hysteresis = <5000>;
++					type = "hot";
++				};
++
++				trip-critical {
++					temperature = <110000>;
++					hysteresis = <0>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&big_alert>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				/* the X1 heats ~25C/s at top OPPs; drop straight down */
++				map1 {
++					trip = <&big_emergency>;
++					cooling-device = <&cpu6 9 THERMAL_NO_LIMIT>,
++							 <&cpu7 9 THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		mid-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&acpm_tmu 1>;
++
++			trips {
++				mid_alert: trip-alert {
++					temperature = <80000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				mid_emergency: trip-emergency {
++					temperature = <92000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				trip-hot {
++					temperature = <100000>;
++					hysteresis = <5000>;
++					type = "hot";
++				};
++
++				trip-critical {
++					temperature = <110000>;
++					hysteresis = <0>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&mid_alert>;
++					cooling-device = <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				/* the X1 heats ~25C/s at top OPPs; drop straight down */
++				map1 {
++					trip = <&mid_emergency>;
++					cooling-device = <&cpu4 4 THERMAL_NO_LIMIT>,
++							 <&cpu5 4 THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		little-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&acpm_tmu 2>;
++
++			trips {
++				little_alert: trip-alert {
++					temperature = <80000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				little_emergency: trip-emergency {
++					temperature = <92000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				trip-hot {
++					temperature = <100000>;
++					hysteresis = <5000>;
++					type = "hot";
++				};
++
++				trip-critical {
++					temperature = <110000>;
++					hysteresis = <0>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&little_alert>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				/* the X1 heats ~25C/s at top OPPs; drop straight down */
++				map1 {
++					trip = <&little_emergency>;
++					cooling-device = <&cpu0 3 THERMAL_NO_LIMIT>,
++							 <&cpu1 3 THERMAL_NO_LIMIT>,
++							 <&cpu2 3 THERMAL_NO_LIMIT>,
++							 <&cpu3 3 THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++
++		gpu-thermal {
++			polling-delay-passive = <100>;
++			polling-delay = <1000>;
++			thermal-sensors = <&acpm_tmu 3>;
++
++			trips {
++				gpu_alert: trip-alert {
++					temperature = <80000>;
++					hysteresis = <5000>;
++					type = "passive";
++				};
++
++				trip-critical {
++					temperature = <110000>;
++					hysteresis = <0>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&gpu_alert>;
++					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
++		};
++	};
++
++
++	cpucl0_opp_table: opp-table-0 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-300000000 {
++			opp-hz = /bits/ 64 <300000000>;
++			opp-microvolt = <543750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-574000000 {
++			opp-hz = /bits/ 64 <574000000>;
++			opp-microvolt = <593750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-738000000 {
++			opp-hz = /bits/ 64 <738000000>;
++			opp-microvolt = <618750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-930000000 {
++			opp-hz = /bits/ 64 <930000000>;
++			opp-microvolt = <656250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1098000000 {
++			opp-hz = /bits/ 64 <1098000000>;
++			opp-microvolt = <693750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1197000000 {
++			opp-hz = /bits/ 64 <1197000000>;
++			opp-microvolt = <718750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1328000000 {
++			opp-hz = /bits/ 64 <1328000000>;
++			opp-microvolt = <750000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1401000000 {
++			opp-hz = /bits/ 64 <1401000000>;
++			opp-microvolt = <775000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1598000000 {
++			opp-hz = /bits/ 64 <1598000000>;
++			opp-microvolt = <831250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1704000000 {
++			opp-hz = /bits/ 64 <1704000000>;
++			opp-microvolt = <868750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1803000000 {
++			opp-hz = /bits/ 64 <1803000000>;
++			opp-microvolt = <900000>;
++			clock-latency-ns = <500000>;
++		};
++	};
++
++	cpucl1_opp_table: opp-table-1 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-400000000 {
++			opp-hz = /bits/ 64 <400000000>;
++			opp-microvolt = <506250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-553000000 {
++			opp-hz = /bits/ 64 <553000000>;
++			opp-microvolt = <537500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-696000000 {
++			opp-hz = /bits/ 64 <696000000>;
++			opp-microvolt = <562500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-799000000 {
++			opp-hz = /bits/ 64 <799000000>;
++			opp-microvolt = <581250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-910000000 {
++			opp-hz = /bits/ 64 <910000000>;
++			opp-microvolt = <606250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1024000000 {
++			opp-hz = /bits/ 64 <1024000000>;
++			opp-microvolt = <625000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1197000000 {
++			opp-hz = /bits/ 64 <1197000000>;
++			opp-microvolt = <662500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1328000000 {
++			opp-hz = /bits/ 64 <1328000000>;
++			opp-microvolt = <687500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1491000000 {
++			opp-hz = /bits/ 64 <1491000000>;
++			opp-microvolt = <731250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1663000000 {
++			opp-hz = /bits/ 64 <1663000000>;
++			opp-microvolt = <775000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1836000000 {
++			opp-hz = /bits/ 64 <1836000000>;
++			opp-microvolt = <818750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1999000000 {
++			opp-hz = /bits/ 64 <1999000000>;
++			opp-microvolt = <868750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2130000000 {
++			opp-hz = /bits/ 64 <2130000000>;
++			opp-microvolt = <918750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2253000000 {
++			opp-hz = /bits/ 64 <2253000000>;
++			opp-microvolt = <968750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2348000000 {
++			opp-hz = /bits/ 64 <2348000000>;
++			opp-microvolt = <1012500>;
++			clock-latency-ns = <500000>;
++		};
++	};
++
++	cpucl2_opp_table: opp-table-2 {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		opp-500000000 {
++			opp-hz = /bits/ 64 <500000000>;
++			opp-microvolt = <500000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-851000000 {
++			opp-hz = /bits/ 64 <851000000>;
++			opp-microvolt = <550000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-984000000 {
++			opp-hz = /bits/ 64 <984000000>;
++			opp-microvolt = <575000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1106000000 {
++			opp-hz = /bits/ 64 <1106000000>;
++			opp-microvolt = <600000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1277000000 {
++			opp-hz = /bits/ 64 <1277000000>;
++			opp-microvolt = <637500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1426000000 {
++			opp-hz = /bits/ 64 <1426000000>;
++			opp-microvolt = <675000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1582000000 {
++			opp-hz = /bits/ 64 <1582000000>;
++			opp-microvolt = <706250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1745000000 {
++			opp-hz = /bits/ 64 <1745000000>;
++			opp-microvolt = <737500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-1826000000 {
++			opp-hz = /bits/ 64 <1826000000>;
++			opp-microvolt = <750000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2048000000 {
++			opp-hz = /bits/ 64 <2048000000>;
++			opp-microvolt = <800000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2188000000 {
++			opp-hz = /bits/ 64 <2188000000>;
++			opp-microvolt = <837500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2252000000 {
++			opp-hz = /bits/ 64 <2252000000>;
++			opp-microvolt = <856250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2401000000 {
++			opp-hz = /bits/ 64 <2401000000>;
++			opp-microvolt = <906250>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2507000000 {
++			opp-hz = /bits/ 64 <2507000000>;
++			opp-microvolt = <943750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2630000000 {
++			opp-hz = /bits/ 64 <2630000000>;
++			opp-microvolt = <987500>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2704000000 {
++			opp-hz = /bits/ 64 <2704000000>;
++			opp-microvolt = <1025000>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2802000000 {
++			opp-hz = /bits/ 64 <2802000000>;
++			opp-microvolt = <1068750>;
++			clock-latency-ns = <500000>;
++		};
++
++		opp-2850000000 {
++			opp-hz = /bits/ 64 <2850000000>;
++			opp-microvolt = <1093750>;
++			clock-latency-ns = <500000>;
++		};
++	};
++
++	/* ect node is required to be present by bootloader */
++	ect {
++	};
++
++	/*
++	 * 24.576 MHz, as on gs101. Downstream CAL lists FIXEDRATE OSCCLK_* as
++	 * 26 MHz, but its own PLL rate tables (e.g. shared0 2133 MHz at
++	 * M=347 P=4 S=0) and the arch timer imply 24.576 MHz.
++	 */
++	oscclk: clock-oscclk {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <24576000>;
++		clock-output-names = "oscclk";
++	};
++
++	psci {
++		compatible = "arm,psci-1.0";
++		method = "smc";
++	};
++
++	reserved_memory: reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <1>;
++		ranges;
++
++		gsa@90200000 {
++			reg = <0x0 0x90200000 0x400000>;
++			no-map;
++		};
++
++		tpu-fw@93000000 {
++			reg = <0x0 0x93000000 0x1000000>;
++			no-map;
++		};
++
++		aoc@94000000 {
++			reg = <0x0 0x94000000 0x3000000>;
++			no-map;
++		};
++
++		abl@f8800000 {
++			reg = <0x0 0xf8800000 0x2000000>;
++			no-map;
++		};
++
++		dss-log@fd3f0000 {
++			reg = <0x0 0xfd3f0000 0xe000>;
++			no-map;
++		};
++
++		debug-kinfo@fd3fe000 {
++			reg = <0x0 0xfd3fe000 0x1000>;
++			no-map;
++		};
++
++		bldr-log@fd800000 {
++			reg = <0x0 0xfd800000 0x100000>;
++			no-map;
++		};
++	};
++
++	gic: interrupt-controller@10400000 {
++		compatible = "arm,gic-v3";
++		#interrupt-cells = <3>;
++		interrupt-controller;
++		reg = <0x0 0x10400000 0x10000>,		/* GICD */
++		      <0x0 0x10440000 0x100000>;	/* GICR * 8 */
++		interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	/*
++	 * PMU_ALIVE is EL3-write-only like on gs101; downstream gs201 uses the
++	 * same SMC (0x82000504) the mainline gs101 PMU driver uses.
++	 * pmu-intr-gen is omitted until its gs201 layout is verified.
++	 */
++	apm_sram: sram@18500000 {
++		compatible = "mmio-sram";
++		reg = <0x0 0x18500000 0x48000>;
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges = <0x0 0x0 0x18500000 0x48000>;
++	};
++
++	firmware {
++		/* Same ACPM protocol and SRAM init data offset as gs101 */
++		acpm_ipc: power-management {
++			compatible = "google,gs201-acpm-ipc";
++			#clock-cells = <1>;
++			mboxes = <&ap2apm_mailbox>;
++			shmem = <&apm_sram>;
++
++			/* TMU sensors: 0 BIG, 1 MID, 2 LITTLE, 3 G3D, 4 ISP, 5 TPU, 6 AUR */
++			acpm_tmu: thermal-sensor {
++				compatible = "google,gs201-acpm-tmu";
++				#thermal-sensor-cells = <1>;
++			};
++		};
++	};
++
++	pmu_system_controller: system-controller@18060000 {
++		compatible = "google,gs201-pmu", "google,gs101-pmu";
++		reg = <0x0 0x18060000 0x10000>;
++
++		/* Same reboot reason register and magics as gs101/downstream */
++		reboot-mode {
++			compatible = "syscon-reboot-mode";
++			offset = <0x0810>; /* EXYNOS_PMU_SYSIP_DAT0 */
++			mode-bootloader = <0xfc>;
++			mode-charge = <0x0a>;
++			mode-dm-verity-device-corrupted = <0x50>;
++			mode-fastboot = <0xfa>;
++			mode-reboot-ab-update = <0x52>;
++			mode-recovery = <0xff>;
++			mode-rescue = <0xf9>;
++			mode-shutdown-thermal = <0x51>;
++			mode-shutdown-thermal-battery = <0x51>;
++		};
++	};
++
++	/*
++	 * Cluster 0 watchdog. PMU offsets/bits match gs101 (downstream
++	 * drv_data_gs201_cl0). The driver stops the bootloader-armed timer.
++	 * Both clocks use oscclk until a gs201 CMU driver exists; the gate is
++	 * left enabled by the bootloader.
++	 */
++	watchdog_cl0: watchdog@10060000 {
++		compatible = "google,gs201-wdt", "google,gs101-wdt";
++		reg = <0x0 0x10060000 0x100>;
++		clocks = <&oscclk>, <&oscclk>;
++		clock-names = "watchdog", "watchdog_src";
++		interrupts = <GIC_SPI 797 IRQ_TYPE_LEVEL_HIGH>;
++		samsung,syscon-phandle = <&pmu_system_controller>;
++		samsung,cluster-index = <0>;
++	};
++
++	/*
++	 * MMIO peripherals. Pin controller clocks are left to the bootloader
++	 * until a gs201 CMU driver exists (clk_ignore_unused).
++	 */
++	soc: soc@0 {
++		compatible = "simple-bus";
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges = <0x0 0x0 0x0 0x40000000>;
++
++		pinctrl_peric0: pinctrl@10840000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x10840000 0x1000>;
++			interrupts = <GIC_SPI 664 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		cmu_peric1: clock-controller@10c00000 {
++			compatible = "google,gs201-cmu-peric1";
++			reg = <0x10c00000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>;
++			clock-names = "oscclk";
++		};
++
++		sysreg_peric1: syscon@10c20000 {
++			compatible = "google,gs201-peric1-sysreg", "syscon";
++			reg = <0x10c20000 0x10000>;
++			clocks = <&cmu_peric1 CLK_GS201_GOUT_BLK_PERIC1_UID_SYSREG_PERIC1_IPCLKPORT_PCLK>;
++		};
++
++		pinctrl_peric1: pinctrl@10c40000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x10c40000 0x1000>;
++			interrupts = <GIC_SPI 683 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&cmu_peric1 CLK_GS201_GOUT_BLK_PERIC1_UID_GPIO_PERIC1_IPCLKPORT_PCLK>;
++			clock-names = "pclk";
++		};
++
++		/* Same USI/SPI IP and layout as gs101 usi0/spi_0 */
++		usi0: usi@10d100c0 {
++			compatible = "google,gs201-usi", "google,gs101-usi",
++				     "samsung,exynos850-usi";
++			reg = <0x10d100c0 0x20>;
++			ranges;
++			#address-cells = <1>;
++			#size-cells = <1>;
++			clocks = <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK>,
++				 <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK>;
++			clock-names = "pclk", "ipclk";
++			samsung,sysreg = <&sysreg_peric1 0x1000>;
++
++			status = "disabled";
++
++			spi_0: spi@10d10000 {
++				compatible = "google,gs201-spi", "google,gs101-spi";
++				reg = <0x10d10000 0x30>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++				clocks = <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK>,
++					 <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK>;
++				clock-names = "spi", "spi_busclk0";
++				interrupts = <GIC_SPI 690 IRQ_TYPE_LEVEL_HIGH>;
++				pinctrl-0 = <&spi0_bus>;
++				pinctrl-names = "default";
++
++				status = "disabled";
++			};
++		};
++
++		cmu_hsi0: clock-controller@11000000 {
++			compatible = "google,gs201-cmu-hsi0";
++			reg = <0x11000000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>;
++			clock-names = "oscclk";
++		};
++
++		/*
++		 * Same USB 3.1 DRD + USB/DP combo PHY IP as gs101 (downstream
++		 * phy_version 0x301, sub 0x404, PMU 0x3eb0/0x3eb4), but the blocks
++		 * are relocated and the PHY ref clock is 19.2 MHz (gs101: 26 MHz).
++		 */
++		usbdrd31_phy: phy@11200000 {
++			compatible = "google,gs201-usb31drd-phy",
++				     "google,gs101-usb31drd-phy";
++			reg = <0x11200000 0x0200>,
++			      <0x11100000 0x0800>,
++			      <0x110f0000 0x2800>;
++			reg-names = "phy", "pcs", "pma";
++			clocks = <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_ACLK_PHYCTRL>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB20_PHY_REFCLK_26>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_ACLK>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_PCLK>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USBDPPHY_SCL_APB_PCLK>;
++			clock-names = "phy", "ref", "ctrl_aclk", "ctrl_pclk", "scl_pclk";
++			#phy-cells = <1>;
++			samsung,pmu-syscon = <&pmu_system_controller>;
++
++			status = "disabled";
++		};
++
++		usbdrd31: usb@11210000 {
++			compatible = "google,gs201-dwusb3", "google,gs101-dwusb3";
++			ranges = <0x0 0x11210000 0x10000>;
++			clocks = <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_BUS_CLK_EARLY>,
++				 <&cmu_hsi0 CLK_GS201_CLK_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_SUSPEND_CLK_26>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_ACLK>,
++				 <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_PCLK>;
++			clock-names = "bus_early", "susp_clk", "link_aclk", "link_pclk";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			status = "disabled";
++
++			usbdrd31_dwc3: usb@0 {
++				compatible = "snps,dwc3";
++				reg = <0x0 0x10000>;
++				clocks = <&cmu_hsi0 CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_REF_CLK_40>;
++				clock-names = "ref";
++				interrupts = <GIC_SPI 379 IRQ_TYPE_LEVEL_HIGH>;
++				phys = <&usbdrd31_phy 0>, <&usbdrd31_phy 1>;
++				phy-names = "usb2-phy", "usb3-phy";
++				snps,has-lpm-erratum;
++				snps,dis_u2_susphy_quirk;
++				snps,dis_u3_susphy_quirk;
++
++				status = "disabled";
++			};
++		};
++
++		pinctrl_hsi1: pinctrl@11840000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x11840000 0x1000>;
++			interrupts = <GIC_SPI 387 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		cmu_hsi2: clock-controller@14400000 {
++			compatible = "google,gs201-cmu-hsi2";
++			reg = <0x14400000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>;
++			clock-names = "oscclk";
++		};
++
++		sysreg_hsi2: syscon@14420000 {
++			compatible = "google,gs201-hsi2-sysreg", "syscon";
++			reg = <0x14420000 0x1000>;
++			clocks = <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK>;
++		};
++
++		pinctrl_hsi2: pinctrl@14440000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x14440000 0x1000>;
++			interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		pinctrl_hsi2ufs: pinctrl@14460000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x14460000 0x1000>;
++			interrupts = <GIC_SPI 422 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		/*
++		 * Same register layout as gs101 (downstream gs201-ufs.dtsi); the
++		 * PHY uses gs201-specific EVT1 calibration.
++		 */
++		ufs_0: ufs@14700000 {
++			compatible = "google,gs201-ufs", "google,gs101-ufs";
++			reg = <0x14700000 0x200>,
++			      <0x14701100 0x200>,
++			      <0x14780000 0xa000>,
++			      <0x14600000 0x100>;
++			reg-names = "hci", "vs_hci", "unipro", "ufsp";
++			interrupts = <GIC_SPI 453 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK>,
++				 <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO>,
++				 <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK>,
++				 <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK>,
++				 <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK>,
++				 <&cmu_hsi2 CLK_GS201_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK>;
++			clock-names = "core_clk", "sclk_unipro_main", "fmp",
++				      "aclk", "pclk", "sysreg";
++			dma-coherent;
++			freq-table-hz = <0 0>, <0 0>, <0 0>, <0 0>, <0 0>, <0 0>;
++			pinctrl-0 = <&ufs_rst_n &ufs_refclk_out>;
++			pinctrl-names = "default";
++			phys = <&ufs_0_phy>;
++			phy-names = "ufs-phy";
++			samsung,sysreg = <&sysreg_hsi2 0x710>;
++
++			status = "disabled";
++		};
++
++		ufs_0_phy: phy@14704000 {
++			compatible = "google,gs201-ufs-phy";
++			reg = <0x14704000 0x3000>;
++			reg-names = "phy-pma";
++			samsung,pmu-syscon = <&pmu_system_controller>;
++			#phy-cells = <0>;
++			clocks = <&oscclk>;
++			clock-names = "ref_clk";
++
++			status = "disabled";
++		};
++
++		pinctrl_gsactrl: pinctrl@17940000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x17940000 0x1000>;
++			/* owned by the GSA security core */
++			status = "disabled";
++		};
++
++		pinctrl_gsacore: pinctrl@17a80000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x17a80000 0x1000>;
++			/* owned by the GSA security core */
++			status = "disabled";
++		};
++
++		pinctrl_gpio_alive: pinctrl@180d0000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x180d0000 0x1000>;
++
++			wakeup-interrupt-controller {
++				compatible = "google,gs201-wakeup-eint",
++					     "google,gs101-wakeup-eint",
++					     "samsung,exynos850-wakeup-eint",
++					     "samsung,exynos7-wakeup-eint";
++			};
++		};
++
++		pinctrl_far_alive: pinctrl@180e0000 {
++			compatible = "google,gs201-pinctrl";
++			reg = <0x180e0000 0x1000>;
++
++			wakeup-interrupt-controller {
++				compatible = "google,gs201-wakeup-eint",
++					     "google,gs101-wakeup-eint",
++					     "samsung,exynos850-wakeup-eint",
++					     "samsung,exynos7-wakeup-eint";
++			};
++
++		};
++
++		/* Same USI/HSI2C IP and layout as gs101 usi13/hsi2c_13 */
++		usi13: usi@10d600c0 {
++			compatible = "google,gs201-usi", "google,gs101-usi",
++				     "samsung,exynos850-usi";
++			reg = <0x10d600c0 0x20>;
++			ranges;
++			#address-cells = <1>;
++			#size-cells = <1>;
++			clocks = <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK>,
++				 <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK>;
++			clock-names = "pclk", "ipclk";
++			samsung,sysreg = <&sysreg_peric1 0x1014>;
++
++			status = "disabled";
++
++			hsi2c_13: i2c@10d60000 {
++				compatible = "google,gs201-hsi2c", "google,gs101-hsi2c",
++					     "samsung,exynosautov9-hsi2c";
++				reg = <0x10d60000 0xc0>;
++				#address-cells = <1>;
++				#size-cells = <0>;
++				clocks = <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK>,
++					 <&cmu_peric1 CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK>;
++				clock-names = "hsi2c", "hsi2c_pclk";
++				interrupts = <GIC_SPI 695 IRQ_TYPE_LEVEL_HIGH>;
++				pinctrl-0 = <&hsi2c13_bus>;
++				pinctrl-names = "default";
++
++				status = "disabled";
++			};
++		};
++
++		cmu_apm: clock-controller@18000000 {
++			compatible = "google,gs201-cmu-apm";
++			reg = <0x18000000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>;
++			clock-names = "oscclk";
++		};
++
++		/* AP <-> APM (ACPM firmware) mailbox, same IP as gs101 */
++		ap2apm_mailbox: mailbox@18210000 {
++			compatible = "google,gs201-mbox", "google,gs101-mbox";
++			reg = <0x18210000 0x1000>;
++			clocks = <&cmu_apm CLK_GS201_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK>;
++			clock-names = "pclk";
++			interrupts = <GIC_SPI 78 IRQ_TYPE_LEVEL_HIGH>;
++			#mbox-cells = <0>;
++		};
++
++		/*
++		 * Mali-G710 MP7 (GPU_ID 0xa8620004, arch 10.8 like the G610).
++		 * Power domains are left on by the bootloader for now. "core" is
++		 * the shader clock (G3D); top/L2 (G3DL2) is held at 750MHz, as
++		 * downstream pairs it with shader clocks of 510-572MHz.
++		 */
++		gpu: gpu@28000000 {
++			compatible = "google,gs201-mali", "arm,mali-valhall-csf";
++			reg = <0x28000000 0x480000>;
++			interrupts = <GIC_SPI 329 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 328 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "job", "mmu", "gpu";
++			clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_G3D>,
++				 <&acpm_ipc GS101_CLK_ACPM_DVFS_G3DL2>;
++			clock-names = "core", "coregroup";
++			assigned-clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_G3DL2>;
++			assigned-clock-rates = <750000000>;
++			operating-points-v2 = <&gpu_opp_table>;
++			#cooling-cells = <2>;
++
++			status = "disabled";
++
++			gpu_opp_table: opp-table {
++				compatible = "operating-points-v2";
++
++				opp-151000000 {
++					opp-hz = /bits/ 64 <151000000>;
++					opp-microvolt = <537500>;
++				};
++
++				opp-202000000 {
++					opp-hz = /bits/ 64 <202000000>;
++					opp-microvolt = <543750>;
++				};
++
++				opp-251000000 {
++					opp-hz = /bits/ 64 <251000000>;
++					opp-microvolt = <556250>;
++				};
++
++				opp-302000000 {
++					opp-hz = /bits/ 64 <302000000>;
++					opp-microvolt = <575000>;
++				};
++
++				opp-351000000 {
++					opp-hz = /bits/ 64 <351000000>;
++					opp-microvolt = <587500>;
++				};
++
++				opp-400000000 {
++					opp-hz = /bits/ 64 <400000000>;
++					opp-microvolt = <600000>;
++				};
++
++				opp-471000000 {
++					opp-hz = /bits/ 64 <471000000>;
++					opp-microvolt = <612500>;
++				};
++
++				opp-510000000 {
++					opp-hz = /bits/ 64 <510000000>;
++					opp-microvolt = <625000>;
++				};
++
++				opp-572000000 {
++					opp-hz = /bits/ 64 <572000000>;
++					opp-microvolt = <637500>;
++				};
++
++				opp-701000000 {
++					opp-hz = /bits/ 64 <701000000>;
++					opp-microvolt = <675000>;
++				};
++
++				opp-762000000 {
++					opp-hz = /bits/ 64 <762000000>;
++					opp-microvolt = <706250>;
++				};
++			};
++		};
++
++		cmu_top: clock-controller@1e080000 {
++			compatible = "google,gs201-cmu-top";
++			reg = <0x1e080000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>;
++			clock-names = "oscclk";
++		};
++	};
++
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
++			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
++			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
++			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>;
++	};
++};
++
++#include "gs201-pinctrl.dtsi"
++
++&pinctrl_peric1 {
++	hsi2c13_bus: hsi2c13-bus-pins {
++		samsung,pins = "gpp25-0", "gpp25-1";
++		samsung,pin-function = <GS101_PIN_FUNC_2>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++
++	spi0_bus: spi0-bus-pins {
++		samsung,pins = "gpp20-0", "gpp20-1", "gpp20-2";
++		samsung,pin-function = <GS101_PIN_FUNC_3>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-drv = <GS101_PIN_DRV_2_5_MA>;
++	};
++};
++
++&pinctrl_hsi2ufs {
++	ufs_rst_n: ufs-rst-n-pins {
++		samsung,pins = "gph3-1";
++		samsung,pin-function = <GS101_PIN_FUNC_2>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-con-pdn = <GS101_PIN_PDN_PREV>;
++		samsung,pin-pud-pdn = <GS101_PIN_PULL_NONE>;
++	};
++
++	ufs_refclk_out: ufs-refclk-out-pins {
++		samsung,pins = "gph3-0";
++		samsung,pin-function = <GS101_PIN_FUNC_2>;
++		samsung,pin-pud = <GS101_PIN_PULL_NONE>;
++		samsung,pin-con-pdn = <GS101_PIN_PDN_PREV>;
++		samsung,pin-pud-pdn = <GS101_PIN_PULL_NONE>;
++	};
++};
+diff --git a/drivers/clk/samsung/Makefile b/drivers/clk/samsung/Makefile
+index b3c4ef4e0..32a269e25 100644
+--- a/drivers/clk/samsung/Makefile
++++ b/drivers/clk/samsung/Makefile
+@@ -29,6 +29,7 @@ obj-$(CONFIG_EXYNOS_ARM64_COMMON_CLK)	+= clk-exynos990.o
+ obj-$(CONFIG_EXYNOS_ARM64_COMMON_CLK)	+= clk-exynosautov9.o
+ obj-$(CONFIG_EXYNOS_ARM64_COMMON_CLK)	+= clk-exynosautov920.o
+ obj-$(CONFIG_EXYNOS_ARM64_COMMON_CLK)	+= clk-gs101.o
++obj-$(CONFIG_EXYNOS_ARM64_COMMON_CLK)	+= clk-gs201.o
+ obj-$(CONFIG_EXYNOS_ACPM_CLK)		+= clk-acpm.o
+ obj-$(CONFIG_S3C64XX_COMMON_CLK)	+= clk-s3c64xx.o
+ obj-$(CONFIG_S5PV210_COMMON_CLK)	+= clk-s5pv210.o clk-s5pv210-audss.o
+diff --git a/drivers/clk/samsung/clk-gs201.c b/drivers/clk/samsung/clk-gs201.c
+new file mode 100644
+index 000000000..bcd3db068
+--- /dev/null
++++ b/drivers/clk/samsung/clk-gs201.c
+@@ -0,0 +1,458 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Minimal Google gs201 (Tensor G2) clock support.
++ *
++ * Generated from Google's downstream gs201 CAL data
++ * (google-modules/soc/gs drivers/soc/google/cal-if/gs201). Only the
++ * clock chains needed by enabled peripherals are described. Clocks
++ * are registered without touching any CMU register (no auto clock
++ * gating setup, no clk_regs), so rates reflect bootloader settings.
++ */
++
++#include <linux/clk-provider.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#include <dt-bindings/clock/google,gs201.h>
++
++#include "clk.h"
++#include "clk-exynos-arm64.h"
++#include "clk-pll.h"
++
++/* CMU_TOP */
++#define PLL_LOCKTIME_PLL_SHARED0	0x0004
++#define PLL_LOCKTIME_PLL_SHARED1	0x0008
++#define PLL_LOCKTIME_PLL_SHARED2	0x000c
++#define PLL_LOCKTIME_PLL_SHARED3	0x0010
++#define PLL_LOCKTIME_PLL_SPARE	0x0014
++#define PLL_CON0_PLL_SHARED0	0x0140
++#define PLL_CON3_PLL_SHARED0	0x014c
++#define PLL_CON0_PLL_SHARED1	0x0180
++#define PLL_CON3_PLL_SHARED1	0x018c
++#define PLL_CON0_PLL_SHARED2	0x01c0
++#define PLL_CON3_PLL_SHARED2	0x01cc
++#define PLL_CON0_PLL_SHARED3	0x0200
++#define PLL_CON3_PLL_SHARED3	0x020c
++#define PLL_CON0_PLL_SPARE	0x0240
++#define PLL_CON3_PLL_SPARE	0x024c
++#define CLK_CON_MUX_MUX_CLKCMU_HSI0_NOC	0x1088
++#define CLK_CON_MUX_MUX_CLKCMU_HSI0_USB31DRD	0x108c
++#define CLK_CON_MUX_MUX_CLKCMU_HSI2_NOC	0x10a0
++#define CLK_CON_MUX_MUX_CLKCMU_HSI2_UFS_EMBD	0x10a8
++#define CLK_CON_MUX_MUX_CLKCMU_PERIC1_IP	0x10f0
++#define CLK_CON_MUX_MUX_CLKCMU_PERIC1_NOC	0x10f4
++#define CLK_CON_DIV_CLKCMU_HSI0_NOC	0x1884
++#define CLK_CON_DIV_CLKCMU_HSI0_USB31DRD	0x1888
++#define CLK_CON_DIV_CLKCMU_HSI2_NOC	0x189c
++#define CLK_CON_DIV_CLKCMU_HSI2_UFS_EMBD	0x18a4
++#define CLK_CON_DIV_CLKCMU_PERIC1_IP	0x18ec
++#define CLK_CON_DIV_CLKCMU_PERIC1_NOC	0x18f0
++#define CLK_CON_DIV_PLL_SHARED0_DIV2	0x1928
++#define CLK_CON_DIV_PLL_SHARED0_DIV4	0x1930
++#define CLK_CON_DIV_PLL_SHARED1_DIV2	0x1938
++#define CLK_CON_DIV_PLL_SHARED1_DIV4	0x1940
++#define CLK_CON_DIV_PLL_SHARED2_DIV2	0x1944
++#define CLK_CON_DIV_PLL_SHARED3_DIV2	0x1948
++#define CLK_CON_GAT_GATE_CLKCMU_HSI0_NOC	0x20ac
++#define CLK_CON_GAT_GATE_CLKCMU_HSI0_USB31DRD	0x20b0
++#define CLK_CON_GAT_GATE_CLKCMU_HSI2_NOC	0x20c4
++#define CLK_CON_GAT_GATE_CLKCMU_HSI2_UFS_EMBD	0x20cc
++#define CLK_CON_GAT_GATE_CLKCMU_PERIC1_IP	0x2110
++#define CLK_CON_GAT_GATE_CLKCMU_PERIC1_NOC	0x2114
++
++/* CMU_HSI2 */
++#define PLL_CON0_MUX_CLKCMU_HSI2_NOC_USER	0x0600
++#define PLL_CON0_MUX_CLKCMU_HSI2_UFS_EMBD_USER	0x0630
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK	0x20a4
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK	0x20a8
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK	0x20c4
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK	0x20e8
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO	0x20ec
++#define CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK	0x20f0
++
++/* CMU_HSI0 */
++#define PLL_LOCKTIME_PLL_USB	0x0004
++#define PLL_CON0_PLL_USB	0x0140
++#define PLL_CON3_PLL_USB	0x014c
++#define PLL_CON0_MUX_CLKCMU_HSI0_ALT_USER	0x0600
++#define PLL_CON0_MUX_CLKCMU_HSI0_NOC_USER	0x0610
++#define PLL_CON0_MUX_CLKCMU_HSI0_TCXO_USER	0x0630
++#define PLL_CON0_MUX_CLKCMU_HSI0_USB20_USER	0x0640
++#define PLL_CON0_MUX_CLKCMU_HSI0_USB31DRD_USER	0x0650
++#define CLK_CON_MUX_MUX_CLK_HSI0_NOC	0x1000
++#define CLK_CON_MUX_MUX_CLK_HSI0_USB20_REF	0x1004
++#define CLK_CON_MUX_MUX_CLK_HSI0_USB31DRD	0x1008
++#define CLK_CON_DIV_DIV_CLK_HSI0_USB	0x1804
++#define CLK_CON_DIV_DIV_CLK_HSI0_USB31DRD	0x1808
++#define CLK_CON_GAT_CLK_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_SUSPEND_CLK_26	0x2030
++#define CLK_CON_GAT_CLK_HSI0_ALT	0x2034
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_SYSREG_HSI0_IPCLKPORT_PCLK	0x2078
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_ACLK	0x207c
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_PCLK	0x2080
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_ACLK	0x2084
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_PCLK	0x2088
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_ACLK_PHYCTRL	0x208c
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_BUS_CLK_EARLY	0x2090
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB20_PHY_REFCLK_26	0x2094
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_REF_CLK_40	0x2098
++#define CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USBDPPHY_SCL_APB_PCLK	0x20a0
++
++/* CMU_PERIC1 */
++#define PLL_CON0_MUX_CLKCMU_PERIC1_NOC_USER	0x0610
++#define PLL_CON0_MUX_CLKCMU_PERIC1_USI0_USI_USER	0x0620
++#define PLL_CON0_MUX_CLKCMU_PERIC1_USI13_USI_USER	0x0660
++#define CLK_CON_DIV_DIV_CLK_PERIC1_USI0_USI	0x1808
++#define CLK_CON_DIV_DIV_CLK_PERIC1_USI13_USI	0x1818
++#define CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK	0x2030
++#define CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK	0x2034
++#define CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK	0x2050
++#define CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK	0x2054
++#define CLK_CON_GAT_GOUT_BLK_PERIC1_UID_GPIO_PERIC1_IPCLKPORT_PCLK	0x2078
++#define CLK_CON_GAT_GOUT_BLK_PERIC1_UID_SYSREG_PERIC1_IPCLKPORT_PCLK	0x209c
++
++/* CMU_APM */
++#define CLK_CON_MUX_MUX_CLKCMU_APM_FUNC	0x1000
++#define CLK_CON_MUX_MUX_CLKCMU_APM_FUNCSRC	0x1004
++#define CLK_CON_GAT_GATE_CLKCMU_APM_FUNC	0x2084
++#define CLK_CON_GAT_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK	0x20d4
++
++PNAME(mux_clkcmu_hsi2_noc_p) = { "pll_shared0_div4", "pll_shared1_div4", "pll_shared2_div2", "pll_shared3_div2", "mout_pll_spare", "oscclk", "oscclk", "oscclk" };
++PNAME(mout_pll_shared0_p) = { "oscclk", "pll_shared0" };
++PNAME(mout_pll_shared1_p) = { "oscclk", "pll_shared1" };
++PNAME(mout_pll_shared2_p) = { "oscclk", "pll_shared2" };
++PNAME(mout_pll_shared3_p) = { "oscclk", "pll_shared3" };
++PNAME(mout_pll_spare_p) = { "oscclk", "pll_spare" };
++PNAME(mux_clkcmu_hsi2_ufs_embd_p) = { "oscclk", "pll_shared0_div4", "pll_shared2_div2", "mout_pll_spare" };
++PNAME(mux_clkcmu_hsi0_noc_p) = { "pll_shared0_div4", "pll_shared1_div4", "pll_shared2_div2", "pll_shared3_div2", "mout_pll_spare", "oscclk", "oscclk", "oscclk" };
++PNAME(mux_clkcmu_hsi0_usb31drd_p) = { "oscclk", "pll_shared2_div2" };
++PNAME(mux_clkcmu_peric1_ip_p) = { "pll_shared0_div4", "pll_shared2_div2", "pll_shared3_div2", "mout_pll_spare" };
++PNAME(mux_clkcmu_peric1_noc_p) = { "pll_shared0_div4", "pll_shared2_div2", "pll_shared3_div2", "mout_pll_spare" };
++
++static const struct samsung_pll_clock top_pll_clks[] __initconst = {
++	PLL(pll_0517x, CLK_GS201_PLL_SHARED0, "pll_shared0", "oscclk",
++	    PLL_LOCKTIME_PLL_SHARED0, PLL_CON3_PLL_SHARED0, NULL),
++	PLL(pll_0517x, CLK_GS201_PLL_SHARED1, "pll_shared1", "oscclk",
++	    PLL_LOCKTIME_PLL_SHARED1, PLL_CON3_PLL_SHARED1, NULL),
++	PLL(pll_0518x, CLK_GS201_PLL_SHARED2, "pll_shared2", "oscclk",
++	    PLL_LOCKTIME_PLL_SHARED2, PLL_CON3_PLL_SHARED2, NULL),
++	PLL(pll_0518x, CLK_GS201_PLL_SHARED3, "pll_shared3", "oscclk",
++	    PLL_LOCKTIME_PLL_SHARED3, PLL_CON3_PLL_SHARED3, NULL),
++	PLL(pll_0518x, CLK_GS201_PLL_SPARE, "pll_spare", "oscclk",
++	    PLL_LOCKTIME_PLL_SPARE, PLL_CON3_PLL_SPARE, NULL),
++};
++
++static const struct samsung_mux_clock top_mux_clks[] __initconst = {
++	MUX(CLK_GS201_MUX_CLKCMU_HSI2_NOC, "mux_clkcmu_hsi2_noc", mux_clkcmu_hsi2_noc_p,
++	    CLK_CON_MUX_MUX_CLKCMU_HSI2_NOC, 0, 3),
++	MUX(CLK_GS201_MOUT_PLL_SHARED0, "mout_pll_shared0", mout_pll_shared0_p,
++	    PLL_CON0_PLL_SHARED0, 4, 1),
++	MUX(CLK_GS201_MOUT_PLL_SHARED1, "mout_pll_shared1", mout_pll_shared1_p,
++	    PLL_CON0_PLL_SHARED1, 4, 1),
++	MUX(CLK_GS201_MOUT_PLL_SHARED2, "mout_pll_shared2", mout_pll_shared2_p,
++	    PLL_CON0_PLL_SHARED2, 4, 1),
++	MUX(CLK_GS201_MOUT_PLL_SHARED3, "mout_pll_shared3", mout_pll_shared3_p,
++	    PLL_CON0_PLL_SHARED3, 4, 1),
++	MUX(CLK_GS201_MOUT_PLL_SPARE, "mout_pll_spare", mout_pll_spare_p,
++	    PLL_CON0_PLL_SPARE, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI2_UFS_EMBD, "mux_clkcmu_hsi2_ufs_embd", mux_clkcmu_hsi2_ufs_embd_p,
++	    CLK_CON_MUX_MUX_CLKCMU_HSI2_UFS_EMBD, 0, 2),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_NOC, "mux_clkcmu_hsi0_noc", mux_clkcmu_hsi0_noc_p,
++	    CLK_CON_MUX_MUX_CLKCMU_HSI0_NOC, 0, 3),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_USB31DRD, "mux_clkcmu_hsi0_usb31drd", mux_clkcmu_hsi0_usb31drd_p,
++	    CLK_CON_MUX_MUX_CLKCMU_HSI0_USB31DRD, 0, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_PERIC1_IP, "mux_clkcmu_peric1_ip", mux_clkcmu_peric1_ip_p,
++	    CLK_CON_MUX_MUX_CLKCMU_PERIC1_IP, 0, 2),
++	MUX(CLK_GS201_MUX_CLKCMU_PERIC1_NOC, "mux_clkcmu_peric1_noc", mux_clkcmu_peric1_noc_p,
++	    CLK_CON_MUX_MUX_CLKCMU_PERIC1_NOC, 0, 2),
++};
++
++static const struct samsung_div_clock top_div_clks[] __initconst = {
++	DIV(CLK_GS201_CLKCMU_HSI2_NOC, "clkcmu_hsi2_noc", "gate_clkcmu_hsi2_noc",
++	    CLK_CON_DIV_CLKCMU_HSI2_NOC, 0, 4),
++	DIV(CLK_GS201_PLL_SHARED0_DIV4, "pll_shared0_div4", "pll_shared0_div2",
++	    CLK_CON_DIV_PLL_SHARED0_DIV4, 0, 1),
++	DIV(CLK_GS201_PLL_SHARED0_DIV2, "pll_shared0_div2", "mout_pll_shared0",
++	    CLK_CON_DIV_PLL_SHARED0_DIV2, 0, 1),
++	DIV(CLK_GS201_PLL_SHARED1_DIV4, "pll_shared1_div4", "pll_shared1_div2",
++	    CLK_CON_DIV_PLL_SHARED1_DIV4, 0, 1),
++	DIV(CLK_GS201_PLL_SHARED1_DIV2, "pll_shared1_div2", "mout_pll_shared1",
++	    CLK_CON_DIV_PLL_SHARED1_DIV2, 0, 1),
++	DIV(CLK_GS201_PLL_SHARED2_DIV2, "pll_shared2_div2", "mout_pll_shared2",
++	    CLK_CON_DIV_PLL_SHARED2_DIV2, 0, 1),
++	DIV(CLK_GS201_PLL_SHARED3_DIV2, "pll_shared3_div2", "mout_pll_shared3",
++	    CLK_CON_DIV_PLL_SHARED3_DIV2, 0, 1),
++	DIV(CLK_GS201_CLKCMU_HSI2_UFS_EMBD, "clkcmu_hsi2_ufs_embd", "gate_clkcmu_hsi2_ufs_embd",
++	    CLK_CON_DIV_CLKCMU_HSI2_UFS_EMBD, 0, 4),
++	DIV(CLK_GS201_CLKCMU_HSI0_NOC, "clkcmu_hsi0_noc", "gate_clkcmu_hsi0_noc",
++	    CLK_CON_DIV_CLKCMU_HSI0_NOC, 0, 4),
++	DIV(CLK_GS201_CLKCMU_HSI0_USB31DRD, "clkcmu_hsi0_usb31drd", "gate_clkcmu_hsi0_usb31drd",
++	    CLK_CON_DIV_CLKCMU_HSI0_USB31DRD, 0, 5),
++	DIV(CLK_GS201_CLKCMU_PERIC1_IP, "clkcmu_peric1_ip", "gate_clkcmu_peric1_ip",
++	    CLK_CON_DIV_CLKCMU_PERIC1_IP, 0, 4),
++	DIV(CLK_GS201_CLKCMU_PERIC1_NOC, "clkcmu_peric1_noc", "gate_clkcmu_peric1_noc",
++	    CLK_CON_DIV_CLKCMU_PERIC1_NOC, 0, 4),
++};
++
++static const struct samsung_gate_clock top_gate_clks[] __initconst = {
++	GATE(CLK_GS201_GATE_CLKCMU_HSI2_NOC, "gate_clkcmu_hsi2_noc", "mux_clkcmu_hsi2_noc",
++	     CLK_CON_GAT_GATE_CLKCMU_HSI2_NOC, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_HSI2_UFS_EMBD, "gate_clkcmu_hsi2_ufs_embd", "mux_clkcmu_hsi2_ufs_embd",
++	     CLK_CON_GAT_GATE_CLKCMU_HSI2_UFS_EMBD, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_HSI0_NOC, "gate_clkcmu_hsi0_noc", "mux_clkcmu_hsi0_noc",
++	     CLK_CON_GAT_GATE_CLKCMU_HSI0_NOC, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_HSI0_USB31DRD, "gate_clkcmu_hsi0_usb31drd", "mux_clkcmu_hsi0_usb31drd",
++	     CLK_CON_GAT_GATE_CLKCMU_HSI0_USB31DRD, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_PERIC1_IP, "gate_clkcmu_peric1_ip", "mux_clkcmu_peric1_ip",
++	     CLK_CON_GAT_GATE_CLKCMU_PERIC1_IP, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_PERIC1_NOC, "gate_clkcmu_peric1_noc", "mux_clkcmu_peric1_noc",
++	     CLK_CON_GAT_GATE_CLKCMU_PERIC1_NOC, 21, CLK_IGNORE_UNUSED, 0),
++};
++
++static const struct samsung_cmu_info top_cmu_info __initconst = {
++	.pll_clks		= top_pll_clks,
++	.nr_pll_clks	= ARRAY_SIZE(top_pll_clks),
++	.mux_clks		= top_mux_clks,
++	.nr_mux_clks	= ARRAY_SIZE(top_mux_clks),
++	.div_clks		= top_div_clks,
++	.nr_div_clks	= ARRAY_SIZE(top_div_clks),
++	.gate_clks		= top_gate_clks,
++	.nr_gate_clks	= ARRAY_SIZE(top_gate_clks),
++	.nr_clk_ids		= 35,
++};
++
++static void __init gs201_cmu_top_init(struct device_node *np)
++{
++	exynos_arm64_register_cmu(NULL, np, &top_cmu_info);
++}
++
++CLK_OF_DECLARE(gs201_cmu_top, "google,gs201-cmu-top", gs201_cmu_top_init);
++
++PNAME(mux_clkcmu_hsi2_noc_user_p) = { "oscclk", "clkcmu_hsi2_noc" };
++PNAME(mux_clkcmu_hsi2_ufs_embd_user_p) = { "oscclk", "clkcmu_hsi2_ufs_embd" };
++
++static const struct samsung_mux_clock hsi2_mux_clks[] __initconst = {
++	MUX(CLK_GS201_MUX_CLKCMU_HSI2_NOC_USER, "mux_clkcmu_hsi2_noc_user", mux_clkcmu_hsi2_noc_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI2_NOC_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI2_UFS_EMBD_USER, "mux_clkcmu_hsi2_ufs_embd_user", mux_clkcmu_hsi2_ufs_embd_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI2_UFS_EMBD_USER, 4, 1),
++};
++
++static const struct samsung_gate_clock hsi2_gate_clks[] __initconst = {
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK, "gout_blk_hsi2_uid_ufs_embd_ipclkport_i_aclk", "mux_clkcmu_hsi2_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO, "gout_blk_hsi2_uid_ufs_embd_ipclkport_i_clk_unipro", "mux_clkcmu_hsi2_ufs_embd_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK, "gout_blk_hsi2_uid_ufs_embd_ipclkport_i_fmp_clk", "mux_clkcmu_hsi2_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK, "gout_blk_hsi2_uid_qe_ufs_embd_hsi2_ipclkport_aclk", "mux_clkcmu_hsi2_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK, "gout_blk_hsi2_uid_qe_ufs_embd_hsi2_ipclkport_pclk", "mux_clkcmu_hsi2_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK, "gout_blk_hsi2_uid_sysreg_hsi2_ipclkport_pclk", "mux_clkcmu_hsi2_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++};
++
++static const struct samsung_cmu_info hsi2_cmu_info __initconst = {
++	.mux_clks		= hsi2_mux_clks,
++	.nr_mux_clks	= ARRAY_SIZE(hsi2_mux_clks),
++	.gate_clks		= hsi2_gate_clks,
++	.nr_gate_clks	= ARRAY_SIZE(hsi2_gate_clks),
++	.nr_clk_ids		= 9,
++};
++
++static void __init gs201_cmu_hsi2_init(struct device_node *np)
++{
++	exynos_arm64_register_cmu(NULL, np, &hsi2_cmu_info);
++}
++
++CLK_OF_DECLARE(gs201_cmu_hsi2, "google,gs201-cmu-hsi2", gs201_cmu_hsi2_init);
++
++PNAME(mux_clk_hsi0_noc_p) = { "mux_clkcmu_hsi0_noc_user", "mux_clkcmu_hsi0_alt_user" };
++PNAME(mux_clkcmu_hsi0_noc_user_p) = { "oscclk", "clkcmu_hsi0_noc" };
++PNAME(mux_clkcmu_hsi0_alt_user_p) = { "oscclk", "clk_hsi0_alt" };
++PNAME(mux_clk_hsi0_usb20_ref_p) = { "div_clk_hsi0_usb", "mux_clkcmu_hsi0_tcxo_user" };
++PNAME(mout_pll_usb_p) = { "oscclk", "pll_usb" };
++PNAME(mux_clkcmu_hsi0_tcxo_user_p) = { "oscclk", "oscclk" };
++PNAME(mux_clk_hsi0_usb31drd_p) = { "div_clk_hsi0_usb", "mux_clkcmu_hsi0_usb31drd_user", "div_clk_hsi0_usb31drd", "oscclk" };
++PNAME(mux_clkcmu_hsi0_usb31drd_user_p) = { "oscclk", "clkcmu_hsi0_usb31drd" };
++PNAME(mux_clkcmu_hsi0_usb20_user_p) = { "oscclk", "usb20phy_phy_clock" };
++
++static const struct samsung_fixed_rate_clock hsi0_fixed_clks[] __initconst = {
++	FRATE(CLK_GS201_I_CLK_HSI0_ALT, "i_clk_hsi0_alt", NULL, 0, 213000000),
++	FRATE(CLK_GS201_USB20PHY_PHY_CLOCK, "usb20phy_phy_clock", NULL, 0, 120000000),
++};
++
++static const struct samsung_pll_clock hsi0_pll_clks[] __initconst = {
++	PLL(pll_0518x, CLK_GS201_PLL_USB, "pll_usb", "oscclk",
++	    PLL_LOCKTIME_PLL_USB, PLL_CON3_PLL_USB, NULL),
++};
++
++static const struct samsung_mux_clock hsi0_mux_clks[] __initconst = {
++	MUX(CLK_GS201_MUX_CLK_HSI0_NOC, "mux_clk_hsi0_noc", mux_clk_hsi0_noc_p,
++	    CLK_CON_MUX_MUX_CLK_HSI0_NOC, 0, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_NOC_USER, "mux_clkcmu_hsi0_noc_user", mux_clkcmu_hsi0_noc_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI0_NOC_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_ALT_USER, "mux_clkcmu_hsi0_alt_user", mux_clkcmu_hsi0_alt_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI0_ALT_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLK_HSI0_USB20_REF, "mux_clk_hsi0_usb20_ref", mux_clk_hsi0_usb20_ref_p,
++	    CLK_CON_MUX_MUX_CLK_HSI0_USB20_REF, 0, 1),
++	MUX(CLK_GS201_MOUT_PLL_USB, "mout_pll_usb", mout_pll_usb_p,
++	    PLL_CON0_PLL_USB, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_TCXO_USER, "mux_clkcmu_hsi0_tcxo_user", mux_clkcmu_hsi0_tcxo_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI0_TCXO_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLK_HSI0_USB31DRD, "mux_clk_hsi0_usb31drd", mux_clk_hsi0_usb31drd_p,
++	    CLK_CON_MUX_MUX_CLK_HSI0_USB31DRD, 0, 2),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_USB31DRD_USER, "mux_clkcmu_hsi0_usb31drd_user", mux_clkcmu_hsi0_usb31drd_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI0_USB31DRD_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_HSI0_USB20_USER, "mux_clkcmu_hsi0_usb20_user", mux_clkcmu_hsi0_usb20_user_p,
++	    PLL_CON0_MUX_CLKCMU_HSI0_USB20_USER, 4, 1),
++};
++
++static const struct samsung_div_clock hsi0_div_clks[] __initconst = {
++	DIV(CLK_GS201_DIV_CLK_HSI0_USB, "div_clk_hsi0_usb", "mout_pll_usb",
++	    CLK_CON_DIV_DIV_CLK_HSI0_USB, 0, 6),
++	DIV(CLK_GS201_DIV_CLK_HSI0_USB31DRD, "div_clk_hsi0_usb31drd", "mux_clkcmu_hsi0_usb20_user",
++	    CLK_CON_DIV_DIV_CLK_HSI0_USB31DRD, 0, 3),
++};
++
++static const struct samsung_gate_clock hsi0_gate_clks[] __initconst = {
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_ACLK_PHYCTRL, "gout_blk_hsi0_uid_usb31drd_ipclkport_aclk_phyctrl", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_ACLK_PHYCTRL, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_CLK_HSI0_ALT, "clk_hsi0_alt", "i_clk_hsi0_alt",
++	     CLK_CON_GAT_CLK_HSI0_ALT, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB20_PHY_REFCLK_26, "gout_blk_hsi0_uid_usb31drd_ipclkport_i_usb20_phy_refclk_26", "mux_clk_hsi0_usb20_ref",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB20_PHY_REFCLK_26, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_ACLK, "gout_blk_hsi0_uid_uasc_hsi0_ctrl_ipclkport_aclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_ACLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_PCLK, "gout_blk_hsi0_uid_uasc_hsi0_ctrl_ipclkport_pclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USBDPPHY_SCL_APB_PCLK, "gout_blk_hsi0_uid_usb31drd_ipclkport_i_usbdpphy_scl_apb_pclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USBDPPHY_SCL_APB_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_BUS_CLK_EARLY, "gout_blk_hsi0_uid_usb31drd_ipclkport_bus_clk_early", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_BUS_CLK_EARLY, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_CLK_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_SUSPEND_CLK_26, "clk_blk_hsi0_uid_usb31drd_ipclkport_i_usb31drd_suspend_clk_26", "mux_clk_hsi0_usb20_ref",
++	     CLK_CON_GAT_CLK_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_SUSPEND_CLK_26, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_ACLK, "gout_blk_hsi0_uid_uasc_hsi0_link_ipclkport_aclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_ACLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_PCLK, "gout_blk_hsi0_uid_uasc_hsi0_link_ipclkport_pclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_REF_CLK_40, "gout_blk_hsi0_uid_usb31drd_ipclkport_i_usb31drd_ref_clk_40", "mux_clk_hsi0_usb31drd",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_REF_CLK_40, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_HSI0_UID_SYSREG_HSI0_IPCLKPORT_PCLK, "gout_blk_hsi0_uid_sysreg_hsi0_ipclkport_pclk", "mux_clk_hsi0_noc",
++	     CLK_CON_GAT_GOUT_BLK_HSI0_UID_SYSREG_HSI0_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++};
++
++static const struct samsung_cmu_info hsi0_cmu_info __initconst = {
++	.fixed_clks		= hsi0_fixed_clks,
++	.nr_fixed_clks	= ARRAY_SIZE(hsi0_fixed_clks),
++	.pll_clks		= hsi0_pll_clks,
++	.nr_pll_clks	= ARRAY_SIZE(hsi0_pll_clks),
++	.mux_clks		= hsi0_mux_clks,
++	.nr_mux_clks	= ARRAY_SIZE(hsi0_mux_clks),
++	.div_clks		= hsi0_div_clks,
++	.nr_div_clks	= ARRAY_SIZE(hsi0_div_clks),
++	.gate_clks		= hsi0_gate_clks,
++	.nr_gate_clks	= ARRAY_SIZE(hsi0_gate_clks),
++	.nr_clk_ids		= 27,
++};
++
++static void __init gs201_cmu_hsi0_init(struct device_node *np)
++{
++	exynos_arm64_register_cmu(NULL, np, &hsi0_cmu_info);
++}
++
++CLK_OF_DECLARE(gs201_cmu_hsi0, "google,gs201-cmu-hsi0", gs201_cmu_hsi0_init);
++
++PNAME(mux_clkcmu_peric1_usi0_usi_user_p) = { "oscclk", "clkcmu_peric1_ip" };
++PNAME(mux_clkcmu_peric1_noc_user_p) = { "oscclk", "clkcmu_peric1_noc" };
++PNAME(mux_clkcmu_peric1_usi13_usi_user_p) = { "oscclk", "clkcmu_peric1_ip" };
++
++static const struct samsung_mux_clock peric1_mux_clks[] __initconst = {
++	MUX(CLK_GS201_MUX_CLKCMU_PERIC1_USI0_USI_USER, "mux_clkcmu_peric1_usi0_usi_user", mux_clkcmu_peric1_usi0_usi_user_p,
++	    PLL_CON0_MUX_CLKCMU_PERIC1_USI0_USI_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_PERIC1_NOC_USER, "mux_clkcmu_peric1_noc_user", mux_clkcmu_peric1_noc_user_p,
++	    PLL_CON0_MUX_CLKCMU_PERIC1_NOC_USER, 4, 1),
++	MUX(CLK_GS201_MUX_CLKCMU_PERIC1_USI13_USI_USER, "mux_clkcmu_peric1_usi13_usi_user", mux_clkcmu_peric1_usi13_usi_user_p,
++	    PLL_CON0_MUX_CLKCMU_PERIC1_USI13_USI_USER, 4, 1),
++};
++
++static const struct samsung_div_clock peric1_div_clks[] __initconst = {
++	DIV(CLK_GS201_DIV_CLK_PERIC1_USI0_USI, "div_clk_peric1_usi0_usi", "mux_clkcmu_peric1_usi0_usi_user",
++	    CLK_CON_DIV_DIV_CLK_PERIC1_USI0_USI, 0, 4),
++	DIV(CLK_GS201_DIV_CLK_PERIC1_USI13_USI, "div_clk_peric1_usi13_usi", "mux_clkcmu_peric1_usi13_usi_user",
++	    CLK_CON_DIV_DIV_CLK_PERIC1_USI13_USI, 0, 4),
++};
++
++static const struct samsung_gate_clock peric1_gate_clks[] __initconst = {
++	GATE(CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK, "clk_blk_peric1_uid_usi0_usi_ipclkport_ipclk", "div_clk_peric1_usi0_usi",
++	     CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK, 21, CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT, 0),
++	GATE(CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK, "clk_blk_peric1_uid_usi0_usi_ipclkport_pclk", "mux_clkcmu_peric1_noc_user",
++	     CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_PERIC1_UID_SYSREG_PERIC1_IPCLKPORT_PCLK, "gout_blk_peric1_uid_sysreg_peric1_ipclkport_pclk", "mux_clkcmu_peric1_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_PERIC1_UID_SYSREG_PERIC1_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GOUT_BLK_PERIC1_UID_GPIO_PERIC1_IPCLKPORT_PCLK, "gout_blk_peric1_uid_gpio_peric1_ipclkport_pclk", "mux_clkcmu_peric1_noc_user",
++	     CLK_CON_GAT_GOUT_BLK_PERIC1_UID_GPIO_PERIC1_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK, "clk_blk_peric1_uid_usi13_usi_ipclkport_ipclk", "div_clk_peric1_usi13_usi",
++	     CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK, 21, CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT, 0),
++	GATE(CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK, "clk_blk_peric1_uid_usi13_usi_ipclkport_pclk", "mux_clkcmu_peric1_noc_user",
++	     CLK_CON_GAT_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++};
++
++static const struct samsung_cmu_info peric1_cmu_info __initconst = {
++	.mux_clks		= peric1_mux_clks,
++	.nr_mux_clks	= ARRAY_SIZE(peric1_mux_clks),
++	.div_clks		= peric1_div_clks,
++	.nr_div_clks	= ARRAY_SIZE(peric1_div_clks),
++	.gate_clks		= peric1_gate_clks,
++	.nr_gate_clks	= ARRAY_SIZE(peric1_gate_clks),
++	.nr_clk_ids		= 12,
++};
++
++static void __init gs201_cmu_peric1_init(struct device_node *np)
++{
++	exynos_arm64_register_cmu(NULL, np, &peric1_cmu_info);
++}
++
++CLK_OF_DECLARE(gs201_cmu_peric1, "google,gs201-cmu-peric1", gs201_cmu_peric1_init);
++
++PNAME(mux_clkcmu_apm_func_p) = { "oscclk", "mux_clkcmu_apm_funcsrc", "pad_clk_apm", "oscclk" };
++PNAME(mux_clkcmu_apm_funcsrc_p) = { "pll_alv_div2_apm", "pll_alv_div4_apm", "pll_alv_div16_apm", "pll_alv_div8_apm" };
++
++static const struct samsung_fixed_rate_clock apm_fixed_clks[] __initconst = {
++	FRATE(CLK_GS201_PLL_ALV_DIV2_APM, "pll_alv_div2_apm", NULL, 0, 394000000),
++	FRATE(CLK_GS201_PLL_ALV_DIV4_APM, "pll_alv_div4_apm", NULL, 0, 197000000),
++	FRATE(CLK_GS201_PLL_ALV_DIV16_APM, "pll_alv_div16_apm", NULL, 0, 50000000),
++	FRATE(CLK_GS201_PLL_ALV_DIV8_APM, "pll_alv_div8_apm", NULL, 0, 99000000),
++	FRATE(CLK_GS201_PAD_CLK_APM, "pad_clk_apm", NULL, 0, 100000000),
++};
++
++static const struct samsung_mux_clock apm_mux_clks[] __initconst = {
++	MUX(CLK_GS201_MUX_CLKCMU_APM_FUNC, "mux_clkcmu_apm_func", mux_clkcmu_apm_func_p,
++	    CLK_CON_MUX_MUX_CLKCMU_APM_FUNC, 0, 2),
++	MUX(CLK_GS201_MUX_CLKCMU_APM_FUNCSRC, "mux_clkcmu_apm_funcsrc", mux_clkcmu_apm_funcsrc_p,
++	    CLK_CON_MUX_MUX_CLKCMU_APM_FUNCSRC, 0, 2),
++};
++
++static const struct samsung_gate_clock apm_gate_clks[] __initconst = {
++	GATE(CLK_GS201_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK, "gout_blk_apm_uid_mailbox_apm_ap_ipclkport_pclk", "gate_clkcmu_apm_func",
++	     CLK_CON_GAT_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK, 21, CLK_IGNORE_UNUSED, 0),
++	GATE(CLK_GS201_GATE_CLKCMU_APM_FUNC, "gate_clkcmu_apm_func", "mux_clkcmu_apm_func",
++	     CLK_CON_GAT_GATE_CLKCMU_APM_FUNC, 21, CLK_IGNORE_UNUSED, 0),
++};
++
++static const struct samsung_cmu_info apm_cmu_info __initconst = {
++	.fixed_clks		= apm_fixed_clks,
++	.nr_fixed_clks	= ARRAY_SIZE(apm_fixed_clks),
++	.mux_clks		= apm_mux_clks,
++	.nr_mux_clks	= ARRAY_SIZE(apm_mux_clks),
++	.gate_clks		= apm_gate_clks,
++	.nr_gate_clks	= ARRAY_SIZE(apm_gate_clks),
++	.nr_clk_ids		= 10,
++};
++
++static void __init gs201_cmu_apm_init(struct device_node *np)
++{
++	exynos_arm64_register_cmu(NULL, np, &apm_cmu_info);
++}
++
++CLK_OF_DECLARE(gs201_cmu_apm, "google,gs201-cmu-apm", gs201_cmu_apm_init);
+diff --git a/drivers/firmware/samsung/exynos-acpm.c b/drivers/firmware/samsung/exynos-acpm.c
+index 942a2e9f0..f7566f458 100644
+--- a/drivers/firmware/samsung/exynos-acpm.c
++++ b/drivers/firmware/samsung/exynos-acpm.c
+@@ -742,17 +742,20 @@ static int acpm_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, acpm);
+ 
+-	acpm_clk_pdev = platform_device_register_data(dev,
++	if (match_data->acpm_clk_dev_name) {
++		acpm_clk_pdev = platform_device_register_data(dev,
+ 						match_data->acpm_clk_dev_name,
+ 						PLATFORM_DEVID_NONE, NULL, 0);
+-	if (IS_ERR(acpm_clk_pdev))
+-		return dev_err_probe(dev, PTR_ERR(acpm_clk_pdev),
+-				     "Failed to register ACPM clocks device.\n");
++		if (IS_ERR(acpm_clk_pdev))
++			return dev_err_probe(dev, PTR_ERR(acpm_clk_pdev),
++					     "Failed to register ACPM clocks device.\n");
+ 
+-	ret = devm_add_action_or_reset(dev, acpm_clk_pdev_unregister,
+-				       acpm_clk_pdev);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "Failed to add devm action.\n");
++		ret = devm_add_action_or_reset(dev, acpm_clk_pdev_unregister,
++					       acpm_clk_pdev);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "Failed to add devm action.\n");
++	}
+ 
+ 	return devm_of_platform_populate(dev);
+ }
+@@ -881,11 +884,21 @@ static const struct acpm_match_data acpm_gs101 = {
+ 	.acpm_clk_dev_name = "gs101-acpm-clk",
+ };
+ 
++/* gs201: same firmware interface and DVFS domain IDs as gs101 */
++static const struct acpm_match_data acpm_gs201 = {
++	.initdata_base = ACPM_GS101_INITDATA_BASE,
++	.acpm_clk_dev_name = "gs101-acpm-clk",
++};
++
+ static const struct of_device_id acpm_match[] = {
+ 	{
+ 		.compatible = "google,gs101-acpm-ipc",
+ 		.data = &acpm_gs101,
+ 	},
++	{
++		.compatible = "google,gs201-acpm-ipc",
++		.data = &acpm_gs201,
++	},
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, acpm_match);
+diff --git a/drivers/gpu/drm/panthor/panthor_drv.c b/drivers/gpu/drm/panthor/panthor_drv.c
+index 46a3080b0..1978067c4 100644
+--- a/drivers/gpu/drm/panthor/panthor_drv.c
++++ b/drivers/gpu/drm/panthor/panthor_drv.c
+@@ -9,6 +9,7 @@
+ 
+ #include <linux/list.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/pagemap.h>
+ #include <linux/platform_device.h>
+@@ -35,6 +36,7 @@
+ #include "panthor_fw.h"
+ #include "panthor_gem.h"
+ #include "panthor_gpu.h"
++#include "panthor_gpu_regs.h"
+ #include "panthor_heap.h"
+ #include "panthor_mmu.h"
+ #include "panthor_sched.h"
+@@ -965,8 +967,20 @@ static int panthor_ioctl_dev_query(struct drm_device *ddev, void *data, struct d
+ 	}
+ 
+ 	switch (args->type) {
+-	case DRM_PANTHOR_DEV_QUERY_GPU_INFO:
+-		return PANTHOR_UOBJ_SET(args->pointer, args->size, ptdev->gpu_info);
++	case DRM_PANTHOR_DEV_QUERY_GPU_INFO: {
++		struct drm_panthor_gpu_info info = ptdev->gpu_info;
++
++		/*
++		 * Userspace (Mesa) doesn't know the Mali-G710 product ID yet.
++		 * It is the same arch 10.8 core as the G610, so report that.
++		 */
++		if (of_device_is_compatible(ptdev->base.dev->of_node,
++					    "google,gs201-mali") &&
++		    GPU_PROD_MAJOR(info.gpu_id) == 2)
++			info.gpu_id = (info.gpu_id & ~GENMASK(19, 16)) | (7 << 16);
++
++		return PANTHOR_UOBJ_SET(args->pointer, args->size, info);
++	}
+ 
+ 	case DRM_PANTHOR_DEV_QUERY_CSIF_INFO:
+ 		return PANTHOR_UOBJ_SET(args->pointer, args->size, ptdev->csif_info);
+diff --git a/drivers/gpu/drm/sysfb/simpledrm.c b/drivers/gpu/drm/sysfb/simpledrm.c
+index 21ddf4502..68f91880e 100644
+--- a/drivers/gpu/drm/sysfb/simpledrm.c
++++ b/drivers/gpu/drm/sysfb/simpledrm.c
+@@ -9,6 +9,7 @@
+ #include <linux/overflow.h>
+ #include <linux/platform_data/simplefb.h>
+ #include <linux/platform_device.h>
++#include <linux/dma-mapping.h>
+ #include <linux/pm.h>
+ #include <linux/pm_domain.h>
+ #include <linux/regulator/consumer.h>
+@@ -574,8 +575,47 @@ static const u64 simpledrm_primary_plane_format_modifiers[] = {
+ 	DRM_SYSFB_PLANE_FORMAT_MODIFIERS,
+ };
+ 
++/*
++ * In render-only setups a non-coherent GPU writes our buffers directly to
++ * memory, but we copy them to the framebuffer with the CPU. Invalidate the
++ * CPU caches for the buffer first, or the copy can contain stale data.
++ */
++static bool simpledrm_gpu_sync;
++module_param_named(gpu_sync, simpledrm_gpu_sync, bool, 0444);
++MODULE_PARM_DESC(gpu_sync, "Invalidate CPU caches before copying buffers (non-coherent render GPUs)");
++
++static void simpledrm_primary_plane_helper_atomic_update(struct drm_plane *plane,
++							  struct drm_atomic_commit *state)
++{
++	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
++	struct drm_framebuffer *fb = plane_state->fb;
++	unsigned int i;
++
++	if (simpledrm_gpu_sync && fb) {
++		for (i = 0; i < fb->format->num_planes; i++) {
++			struct drm_gem_object *obj = drm_gem_fb_get_obj(fb, i);
++			struct sg_table *sgt;
++
++			if (!obj || drm_gem_is_imported(obj))
++				continue;
++
++			sgt = drm_gem_shmem_get_pages_sgt(to_drm_gem_shmem_obj(obj));
++			if (!IS_ERR(sgt))
++				dma_sync_sgtable_for_cpu(plane->dev->dev, sgt,
++							 DMA_FROM_DEVICE);
++		}
++	}
++
++	drm_sysfb_plane_helper_atomic_update(plane, state);
++}
++
+ static const struct drm_plane_helper_funcs simpledrm_primary_plane_helper_funcs = {
+-	DRM_SYSFB_PLANE_HELPER_FUNCS,
++	.begin_fb_access = drm_sysfb_plane_helper_begin_fb_access,
++	.end_fb_access = drm_gem_end_shadow_fb_access,
++	.atomic_check = drm_sysfb_plane_helper_atomic_check,
++	.atomic_update = simpledrm_primary_plane_helper_atomic_update,
++	.atomic_disable = drm_sysfb_plane_helper_atomic_disable,
++	.get_scanout_buffer = drm_sysfb_plane_helper_get_scanout_buffer,
+ };
+ 
+ static const struct drm_plane_funcs simpledrm_primary_plane_funcs = {
+@@ -927,6 +967,13 @@ static int simpledrm_probe(struct platform_device *pdev)
+ 	struct drm_device *dev;
+ 	int ret;
+ 
++	/* buffers can live anywhere in RAM; avoid swiotlb bounces on sync */
++	if (simpledrm_gpu_sync) {
++		ret = dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
++		if (ret)
++			return ret;
++	}
++
+ 	sdev = simpledrm_device_create(&simpledrm_driver, pdev);
+ 	if (IS_ERR(sdev))
+ 		return PTR_ERR(sdev);
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 0f64b40c6..6204d6d82 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -331,6 +331,16 @@ config TOUCHSCREEN_HAMPSHIRE
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called hampshire.
+ 
++config TOUCHSCREEN_FOCALTECH_FT3658
++	tristate "FocalTech FT3658 SPI touchscreen"
++	depends on SPI
++	help
++	  Say Y here if you have a FocalTech FT3658 touchscreen connected
++	  over SPI, as found on the Google Pixel 7.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called focaltech-ft3658.
++
+ config TOUCHSCREEN_EETI
+ 	tristate "EETI touchscreen panel support"
+ 	depends on I2C
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index 477844b09..c289c7184 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -36,6 +36,7 @@ obj-$(CONFIG_TOUCHSCREEN_EDT_FT5X06)	+= edt-ft5x06.o
+ obj-$(CONFIG_TOUCHSCREEN_HAMPSHIRE)	+= hampshire.o
+ obj-$(CONFIG_TOUCHSCREEN_HYCON_HY46XX)	+= hycon-hy46xx.o
+ obj-$(CONFIG_TOUCHSCREEN_GUNZE)		+= gunze.o
++obj-$(CONFIG_TOUCHSCREEN_FOCALTECH_FT3658)	+= focaltech-ft3658.o
+ obj-$(CONFIG_TOUCHSCREEN_EETI)		+= eeti_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_EKTF2127)	+= ektf2127.o
+ obj-$(CONFIG_TOUCHSCREEN_ELAN)		+= elants_i2c.o
+diff --git a/drivers/input/touchscreen/focaltech-ft3658.c b/drivers/input/touchscreen/focaltech-ft3658.c
+new file mode 100644
+index 000000000..c47a56d4c
+--- /dev/null
++++ b/drivers/input/touchscreen/focaltech-ft3658.c
+@@ -0,0 +1,309 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * FocalTech FT3658 SPI touchscreen driver
++ *
++ * Minimal driver for the FT3658(U) as used on the Google Pixel 7 (panther).
++ * The controller runs firmware from its internal flash; this driver only
++ * resets it and reports the standard FocalTech point data.
++ *
++ * Protocol reference: Google's downstream focaltech_touch ft3658 driver.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++#include <linux/spi/spi.h>
++
++#define FT3658_REG_TOUCH_DATA	0x01
++#define FT3658_REG_CHIP_ID2	0x9f
++#define FT3658_REG_CHIP_ID	0xa3
++#define FT3658_REG_FW_VER	0xa6
++#define FT3658_REG_VENDOR_ID	0xa8
++
++#define FT3658_CHIP_ID		0x56
++#define FT3658_CHIP_ID2		0x52
++
++#define FT3658_CMD_WRITE	0x00
++#define FT3658_CMD_READ		0x80
++#define FT3658_CMD_CRC_EN	0x20
++#define FT3658_HDR_LEN		4
++#define FT3658_DUMMY_LEN	3
++#define FT3658_CRC_LEN		2
++/* status byte (4th byte clocked back): bits 7/5 set means busy/error */
++#define FT3658_STATUS_ERR	0xa0
++#define FT3658_RETRIES		3
++#define FT3658_CS_HIGH_US	150
++
++#define FT3658_MAX_POINTS	10
++#define FT3658_POINT_LEN	6
++/* point count byte + 10 points, as read from FT3658_REG_TOUCH_DATA */
++#define FT3658_DATA_LEN		(2 + FT3658_MAX_POINTS * FT3658_POINT_LEN)
++#define FT3658_BUF_LEN		(FT3658_HDR_LEN + FT3658_DUMMY_LEN + \
++				 FT3658_DATA_LEN + FT3658_CRC_LEN)
++
++#define FT3658_EVENT_DOWN	0
++#define FT3658_EVENT_UP		1
++#define FT3658_EVENT_CONTACT	2
++
++struct ft3658 {
++	struct spi_device *spi;
++	struct input_dev *input;
++	struct gpio_desc *reset_gpio;
++	struct regulator_bulk_data supplies[2];
++	struct touchscreen_properties prop;
++	struct mutex bus_lock;
++	u8 tx[FT3658_BUF_LEN] ____cacheline_aligned;
++	u8 rx[FT3658_BUF_LEN];
++};
++
++static u16 ft3658_crc(const u8 *data, size_t len)
++{
++	u16 crc = 0xffff;
++	int i;
++
++	while (len--) {
++		crc ^= *data++;
++		for (i = 0; i < 8; i++)
++			crc = (crc & 1) ? (crc >> 1) ^ 0x8408 : crc >> 1;
++	}
++
++	return crc;
++}
++
++static int ft3658_read(struct ft3658 *ts, u8 reg, u8 *data, size_t len)
++{
++	size_t dp = FT3658_HDR_LEN + FT3658_DUMMY_LEN;
++	size_t xlen = dp + len + FT3658_CRC_LEN;
++	struct spi_transfer xfer = {
++		.tx_buf = ts->tx,
++		.rx_buf = ts->rx,
++		.len = xlen,
++	};
++	u16 crc;
++	int ret = -EIO, i;
++
++	if (xlen > FT3658_BUF_LEN)
++		return -EINVAL;
++
++	mutex_lock(&ts->bus_lock);
++	for (i = 0; i < FT3658_RETRIES; i++) {
++		memset(ts->tx, 0, xlen);
++		ts->tx[0] = reg;
++		ts->tx[1] = FT3658_CMD_READ | FT3658_CMD_CRC_EN;
++		ts->tx[2] = len >> 8;
++		ts->tx[3] = len & 0xff;
++
++		ret = spi_sync_transfer(ts->spi, &xfer, 1);
++		udelay(FT3658_CS_HIGH_US);
++		if (ret)
++			continue;
++
++		if (ts->rx[3] & FT3658_STATUS_ERR) {
++			ret = -EIO;
++			continue;
++		}
++
++		crc = ts->rx[dp + len] | (ts->rx[dp + len + 1] << 8);
++		if (ft3658_crc(&ts->rx[dp], len) != crc) {
++			ret = -EBADMSG;
++			continue;
++		}
++
++		memcpy(data, &ts->rx[dp], len);
++		ret = 0;
++		break;
++	}
++	mutex_unlock(&ts->bus_lock);
++
++	if (ret)
++		dev_dbg(&ts->spi->dev, "read 0x%02x failed (%d), status 0x%02x\n",
++			reg, ret, ts->rx[3]);
++
++	return ret;
++}
++
++static int ft3658_read_reg(struct ft3658 *ts, u8 reg, u8 *val)
++{
++	return ft3658_read(ts, reg, val, 1);
++}
++
++static void ft3658_reset(struct ft3658 *ts)
++{
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++	msleep(200);
++}
++
++static irqreturn_t ft3658_irq(int irq, void *dev_id)
++{
++	struct ft3658 *ts = dev_id;
++	u8 buf[FT3658_DATA_LEN];
++	int i, ret;
++
++	ret = ft3658_read(ts, FT3658_REG_TOUCH_DATA, buf, sizeof(buf));
++	if (ret)
++		return IRQ_HANDLED;
++
++	/* buf[1] = number of points; then FT3658_POINT_LEN bytes per point */
++	for (i = 0; i < FT3658_MAX_POINTS; i++) {
++		u8 *p = &buf[2 + i * FT3658_POINT_LEN];
++		unsigned int id = p[2] >> 4;
++		unsigned int event = p[0] >> 6;
++		unsigned int x, y, major;
++		bool down;
++
++		if (id >= FT3658_MAX_POINTS)
++			break;
++
++		x = ((p[0] & 0x0f) << 8) | p[1];
++		y = ((p[2] & 0x0f) << 8) | p[3];
++		major = (p[5] >> 1) & 0x7f;
++		down = event == FT3658_EVENT_DOWN || event == FT3658_EVENT_CONTACT;
++
++		input_mt_slot(ts->input, id);
++		if (!input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, down))
++			continue;
++
++		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
++		if (major)
++			input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, major);
++	}
++
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++
++	return IRQ_HANDLED;
++}
++
++static void ft3658_power_off(void *data)
++{
++	struct ft3658 *ts = data;
++
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	regulator_bulk_disable(ARRAY_SIZE(ts->supplies), ts->supplies);
++}
++
++static int ft3658_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct ft3658 *ts;
++	u8 id, id2, fw = 0, vendor = 0;
++	int ret;
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->spi = spi;
++	mutex_init(&ts->bus_lock);
++	spi_set_drvdata(spi, ts);
++
++	spi->mode = SPI_MODE_0;
++	spi->bits_per_word = 8;
++	if (!spi->max_speed_hz)
++		spi->max_speed_hz = 10000000;
++	ret = spi_setup(spi);
++	if (ret)
++		return ret;
++
++	ts->supplies[0].supply = "vdd";
++	ts->supplies[1].supply = "avdd";
++	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(ts->supplies),
++				      ts->supplies);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to get supplies\n");
++
++	ts->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ts->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
++				     "failed to get reset gpio\n");
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(ts->supplies), ts->supplies);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to enable supplies\n");
++
++	ret = devm_add_action_or_reset(dev, ft3658_power_off, ts);
++	if (ret)
++		return ret;
++
++	usleep_range(1000, 2000);
++	ft3658_reset(ts);
++
++	ret = ft3658_read_reg(ts, FT3658_REG_CHIP_ID, &id);
++	if (!ret)
++		ret = ft3658_read_reg(ts, FT3658_REG_CHIP_ID2, &id2);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "failed to read chip id (status 0x%02x, raw %*ph)\n",
++				     ts->rx[3], 12, ts->rx);
++
++	ft3658_read_reg(ts, FT3658_REG_FW_VER, &fw);
++	ft3658_read_reg(ts, FT3658_REG_VENDOR_ID, &vendor);
++	dev_info(dev, "chip id %02x%02x, firmware 0x%02x, vendor 0x%02x\n",
++		 id, id2, fw, vendor);
++
++	if (id != FT3658_CHIP_ID || id2 != FT3658_CHIP_ID2)
++		return dev_err_probe(dev, -ENODEV,
++				     "unexpected chip id (firmware not running?)\n");
++
++	ts->input = devm_input_allocate_device(dev);
++	if (!ts->input)
++		return -ENOMEM;
++
++	ts->input->name = "FocalTech FT3658 Touchscreen";
++	ts->input->id.bustype = BUS_SPI;
++
++	input_set_capability(ts->input, EV_ABS, ABS_MT_POSITION_X);
++	input_set_capability(ts->input, EV_ABS, ABS_MT_POSITION_Y);
++	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, 0x7f, 0, 0);
++	touchscreen_parse_properties(ts->input, true, &ts->prop);
++
++	ret = input_mt_init_slots(ts->input, FT3658_MAX_POINTS,
++				  INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (ret)
++		return ret;
++
++	ret = input_register_device(ts->input);
++	if (ret)
++		return ret;
++
++	ret = devm_request_threaded_irq(dev, spi->irq, NULL, ft3658_irq,
++					IRQF_ONESHOT, "ft3658", ts);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to request irq\n");
++
++	return 0;
++}
++
++static const struct of_device_id ft3658_of_match[] = {
++	{ .compatible = "focaltech,ft3658" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, ft3658_of_match);
++
++static const struct spi_device_id ft3658_spi_ids[] = {
++	{ "ft3658" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, ft3658_spi_ids);
++
++static struct spi_driver ft3658_driver = {
++	.driver = {
++		.name = "ft3658",
++		.of_match_table = ft3658_of_match,
++	},
++	.id_table = ft3658_spi_ids,
++	.probe = ft3658_probe,
++};
++module_spi_driver(ft3658_driver);
++
++MODULE_DESCRIPTION("FocalTech FT3658 SPI touchscreen driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mfd/sec-acpm.c b/drivers/mfd/sec-acpm.c
+index d11fbf5b9..f93d4f082 100644
+--- a/drivers/mfd/sec-acpm.c
++++ b/drivers/mfd/sec-acpm.c
+@@ -365,6 +365,34 @@ static const struct regmap_config s2mpg11_regmap_config_meter = {
+ 	.cache_type = REGCACHE_FLAT,
+ };
+ 
++/*
++ * S2MPG12 (gs201 main PMIC): minimal uncached regmaps, all registers are
++ * accessed directly through ACPM.
++ */
++static const struct regmap_config s2mpg12_regmap_config_common = {
++	.name = "common",
++	.reg_bits = ACPM_ADDR_BITS,
++	.val_bits = 8,
++	.max_register = 0xff,
++	.cache_type = REGCACHE_NONE,
++};
++
++static const struct regmap_config s2mpg12_regmap_config_pmic = {
++	.name = "pmic",
++	.reg_bits = ACPM_ADDR_BITS,
++	.val_bits = 8,
++	.max_register = 0xff,
++	.cache_type = REGCACHE_NONE,
++};
++
++static const struct regmap_config s2mpg12_regmap_config_meter = {
++	.name = "meter",
++	.reg_bits = ACPM_ADDR_BITS,
++	.val_bits = 8,
++	.max_register = 0xff,
++	.cache_type = REGCACHE_NONE,
++};
++
+ struct sec_pmic_acpm_shared_bus_context {
+ 	struct acpm_handle *acpm;
+ 	unsigned int acpm_chan_id;
+@@ -559,9 +587,19 @@ static const struct sec_pmic_acpm_platform_data s2mpg11_data = {
+ 	.regmap_cfg_meter = &s2mpg11_regmap_config_meter,
+ };
+ 
++static const struct sec_pmic_acpm_platform_data s2mpg12_data = {
++	.device_type = S2MPG12,
++	.acpm_chan_id = 2,
++	.speedy_channel = 0,
++	.regmap_cfg_common = &s2mpg12_regmap_config_common,
++	.regmap_cfg_pmic = &s2mpg12_regmap_config_pmic,
++	.regmap_cfg_meter = &s2mpg12_regmap_config_meter,
++};
++
+ static const struct of_device_id sec_pmic_acpm_of_match[] = {
+ 	{ .compatible = "samsung,s2mpg10-pmic", .data = &s2mpg10_data, },
+ 	{ .compatible = "samsung,s2mpg11-pmic", .data = &s2mpg11_data, },
++	{ .compatible = "samsung,s2mpg12-pmic", .data = &s2mpg12_data, },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, sec_pmic_acpm_of_match);
+diff --git a/drivers/mfd/sec-common.c b/drivers/mfd/sec-common.c
+index fe92bc4a3..c7fa1cf12 100644
+--- a/drivers/mfd/sec-common.c
++++ b/drivers/mfd/sec-common.c
+@@ -50,6 +50,10 @@ static const struct mfd_cell s2mpg10_devs[] = {
+ 	MFD_CELL_OF("s2mpg10-gpio", NULL, NULL, 0, 0, "samsung,s2mpg10-gpio"),
+ };
+ 
++static const struct mfd_cell s2mpg12_devs[] = {
++	MFD_CELL_NAME("s2mpg12-regulator"),
++};
++
+ static const struct mfd_cell s2mpg11_devs[] = {
+ 	MFD_CELL_NAME("s2mpg11-meter"),
+ 	MFD_CELL_NAME("s2mpg11-regulator"),
+@@ -125,6 +129,7 @@ static void sec_pmic_dump_rev(struct sec_pmic_dev *sec_pmic)
+ 	switch (sec_pmic->device_type) {
+ 	case S2MPG10:
+ 	case S2MPG11:
++	case S2MPG12:
+ 		/* For s2mpg1x, the revision is in a different regmap */
+ 		return;
+ 	case S2MU005:
+@@ -247,6 +252,10 @@ int sec_pmic_probe(struct device *dev, int device_type, unsigned int irq,
+ 		sec_devs = s2mpg11_devs;
+ 		num_sec_devs = ARRAY_SIZE(s2mpg11_devs);
+ 		break;
++	case S2MPG12:
++		sec_devs = s2mpg12_devs;
++		num_sec_devs = ARRAY_SIZE(s2mpg12_devs);
++		break;
+ 	case S2MPS11X:
+ 		sec_devs = s2mps11_devs;
+ 		num_sec_devs = ARRAY_SIZE(s2mps11_devs);
+diff --git a/drivers/mfd/sec-irq.c b/drivers/mfd/sec-irq.c
+index 42862807b..fa3154ceb 100644
+--- a/drivers/mfd/sec-irq.c
++++ b/drivers/mfd/sec-irq.c
+@@ -487,6 +487,7 @@ struct regmap_irq_chip_data *sec_irq_init(struct sec_pmic_dev *sec_pmic)
+ 		sec_irq_chip = &s5m8767_irq_chip;
+ 		break;
+ 	case S2DOS05:
++	case S2MPG12:
+ 		return NULL;
+ 	case S2MPA01:
+ 		sec_irq_chip = &s2mps14_irq_chip;
+diff --git a/drivers/phy/samsung/phy-exynos5-usbdrd.c b/drivers/phy/samsung/phy-exynos5-usbdrd.c
+index 8711a3b62..1bd0c0719 100644
+--- a/drivers/phy/samsung/phy-exynos5-usbdrd.c
++++ b/drivers/phy/samsung/phy-exynos5-usbdrd.c
+@@ -1560,7 +1560,8 @@ static void exynos850_usbdrd_utmi_init(struct exynos5_usbdrd_phy *phy_drd)
+ 	reg |= FIELD_PREP(LINKCTRL_BUS_FILTER_BYPASS, 0xf);
+ 	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
+ 
+-	if (!phy_drd->sw) {
++	/* with a Type-C switch, keep the state from the last orientation update */
++	if (!phy_drd->sw || phy_drd->orientation != TYPEC_ORIENTATION_NONE) {
+ 		reg = readl(regs_base + EXYNOS850_DRD_UTMI);
+ 		reg |= UTMI_FORCE_BVALID | UTMI_FORCE_VBUSVALID;
+ 		writel(reg, regs_base + EXYNOS850_DRD_UTMI);
+@@ -2851,6 +2852,135 @@ static const struct exynos5_usbdrd_phy_tuning *gs101_tunes[PTS_MAX] = {
+ 	[PTS_PIPE3_POSTLOCK] = gs101_tunes_pipe3_postlock,
+ };
+ 
++/*
++ * gs201 feeds the USB/DP combo PHY a 19.2MHz reference clock (gs101: 26MHz).
++ * PMA defaults for that, generated from downstream
++ * phy_exynos_usbdp_g2_v4_pma_default_sfr_update_19_2Mhz{,_Gen1,_Gen2}().
++ */
++static const struct exynos5_usbdrd_phy_tuning gs201_tunes_pipe3_preinit[] = {
++	PHY_TUNING_ENTRY_PMA(0x009c, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x00a0, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x00a8, 0xff, 0x31),
++	PHY_TUNING_ENTRY_PMA(0x00b4, 0x40, 0x40),
++	PHY_TUNING_ENTRY_PMA(0x00c8, 0xff, 0x27),
++	PHY_TUNING_ENTRY_PMA(0x00d0, 0xff, 0x10),
++	PHY_TUNING_ENTRY_PMA(0x00d4, 0x4f, 0x0b),
++	PHY_TUNING_ENTRY_PMA(0x00d8, 0x3f, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x00dc, 0xfc, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x00e4, 0x3f, 0x32),
++	PHY_TUNING_ENTRY_PMA(0x00e8, 0x7c, 0x14),
++	PHY_TUNING_ENTRY_PMA(0x00f8, -1, 0x1c),
++	PHY_TUNING_ENTRY_PMA(0x00fc, -1, 0x54),
++	PHY_TUNING_ENTRY_PMA(0x01d0, 0x80, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0218, 0x20, 0x20),
++	PHY_TUNING_ENTRY_PMA(0x0224, 0x01, 0x01),
++	PHY_TUNING_ENTRY_PMA(0x0320, -1, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x0324, -1, 0x23),
++	PHY_TUNING_ENTRY_PMA(0x0404, 0xff, 0xbb),
++	PHY_TUNING_ENTRY_PMA(0x04b0, 0x7f, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x04b4, 0x7f, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x04d0, 0x7f, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x04d4, 0x7f, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x04f0, 0xff, 0x0f),
++	PHY_TUNING_ENTRY_PMA(0x04f4, 0xff, 0x0f),
++	PHY_TUNING_ENTRY_PMA(0x0510, 0xff, 0x0f),
++	PHY_TUNING_ENTRY_PMA(0x0514, 0xff, 0x0f),
++	PHY_TUNING_ENTRY_PMA(0x05a8, 0xff, 0x2b),
++	PHY_TUNING_ENTRY_PMA(0x05ac, 0xff, 0x0f),
++	PHY_TUNING_ENTRY_PMA(0x05b0, 0xff, 0x1e),
++	PHY_TUNING_ENTRY_PMA(0x05bc, 0xff, 0x13),
++	PHY_TUNING_ENTRY_PMA(0x05c0, 0xff, 0x13),
++	PHY_TUNING_ENTRY_PMA(0x0858, -1, 0x63),
++	PHY_TUNING_ENTRY_PMA(0x08f0, -1, 0x30),
++	PHY_TUNING_ENTRY_PMA(0x0908, -1, 0x10),
++	PHY_TUNING_ENTRY_PMA(0x091c, -1, 0x1d),
++	PHY_TUNING_ENTRY_PMA(0x0928, -1, 0x0c),
++	PHY_TUNING_ENTRY_PMA(0x0934, -1, 0x7f),
++	PHY_TUNING_ENTRY_PMA(0x0948, -1, 0x32),
++	PHY_TUNING_ENTRY_PMA(0x09e0, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x09e4, -1, 0x35),
++	PHY_TUNING_ENTRY_PMA(0x0a08, -1, 0x0c),
++	PHY_TUNING_ENTRY_PMA(0x0a0c, -1, 0x05),
++	PHY_TUNING_ENTRY_PMA(0x0ad8, 0x01, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0adc, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x0ae0, 0x01, 0x01),
++	PHY_TUNING_ENTRY_PMA(0x0ae4, 0xff, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x0bb4, -1, 0xa0),
++	PHY_TUNING_ENTRY_PMA(0x0c68, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0c6c, 0xff, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x0c8c, -1, 0xff),
++	PHY_TUNING_ENTRY_PMA(0x0c90, 0xff, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x0c9c, -1, 0x7d),
++	PHY_TUNING_ENTRY_PMA(0x0ca8, -1, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x0cac, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0cb0, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0cb4, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0cb8, -1, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x0cbc, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0cc0, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0cc4, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0dec, -1, 0x2b),
++	PHY_TUNING_ENTRY_PMA(0x0df4, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0e0c, -1, 0x3c),
++	PHY_TUNING_ENTRY_PMA(0x0e18, 0x01, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x0e1c, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x0e20, 0x01, 0x01),
++	PHY_TUNING_ENTRY_PMA(0x0e24, 0xff, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x0e7c, -1, 0x06),
++	PHY_TUNING_ENTRY_PMA(0x0ebc, -1, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x104c, -1, 0x05),
++	PHY_TUNING_ENTRY_PMA(0x1058, -1, 0x63),
++	PHY_TUNING_ENTRY_PMA(0x1858, -1, 0x63),
++	PHY_TUNING_ENTRY_PMA(0x18f0, -1, 0x30),
++	PHY_TUNING_ENTRY_PMA(0x1908, -1, 0x10),
++	PHY_TUNING_ENTRY_PMA(0x191c, -1, 0x1d),
++	PHY_TUNING_ENTRY_PMA(0x1928, -1, 0x0c),
++	PHY_TUNING_ENTRY_PMA(0x1934, -1, 0x7f),
++	PHY_TUNING_ENTRY_PMA(0x1948, -1, 0x32),
++	PHY_TUNING_ENTRY_PMA(0x19e0, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x19e4, -1, 0x35),
++	PHY_TUNING_ENTRY_PMA(0x1a08, -1, 0x0c),
++	PHY_TUNING_ENTRY_PMA(0x1a0c, -1, 0x05),
++	PHY_TUNING_ENTRY_PMA(0x1ad8, 0x01, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1adc, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x1ae0, 0x01, 0x01),
++	PHY_TUNING_ENTRY_PMA(0x1ae4, 0xff, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x1bb4, -1, 0xa0),
++	PHY_TUNING_ENTRY_PMA(0x1c68, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1c6c, 0xff, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x1c8c, -1, 0xff),
++	PHY_TUNING_ENTRY_PMA(0x1c90, 0xff, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x1c9c, -1, 0x7d),
++	PHY_TUNING_ENTRY_PMA(0x1ca8, -1, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x1cac, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1cb0, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1cb4, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1cb8, -1, 0x03),
++	PHY_TUNING_ENTRY_PMA(0x1cbc, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1cc0, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1cc4, 0xff, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1dec, -1, 0x2b),
++	PHY_TUNING_ENTRY_PMA(0x1df4, -1, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1e0c, -1, 0x3c),
++	PHY_TUNING_ENTRY_PMA(0x1e18, 0x01, 0x00),
++	PHY_TUNING_ENTRY_PMA(0x1e1c, 0xff, 0x82),
++	PHY_TUNING_ENTRY_PMA(0x1e20, 0x01, 0x01),
++	PHY_TUNING_ENTRY_PMA(0x1e24, 0xff, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x1e7c, -1, 0x06),
++	PHY_TUNING_ENTRY_PMA(0x1ebc, -1, 0x04),
++	PHY_TUNING_ENTRY_PMA(0x204c, -1, 0x05),
++	PHY_TUNING_ENTRY_PMA(0x2058, -1, 0x63),
++
++	PHY_TUNING_ENTRY_LAST
++};
++
++static const struct exynos5_usbdrd_phy_tuning *gs201_tunes[PTS_MAX] = {
++	[PTS_UTMI_POSTINIT] = gs101_tunes_utmi_postinit,
++	[PTS_PIPE3_PREINIT] = gs201_tunes_pipe3_preinit,
++	[PTS_PIPE3_INIT] = gs101_tunes_pipe3_init,
++	[PTS_PIPE3_POSTLOCK] = gs101_tunes_pipe3_postlock,
++};
++
+ static const char * const gs101_clk_names[] = {
+ 	"phy", "ctrl_aclk", "ctrl_pclk", "scl_pclk",
+ };
+@@ -2875,7 +3005,25 @@ static const struct exynos5_usbdrd_phy_drvdata gs101_usbd31rd_phy = {
+ 	.n_regulators			= ARRAY_SIZE(gs101_regulator_names),
+ };
+ 
++static const struct exynos5_usbdrd_phy_drvdata gs201_usbd31rd_phy = {
++	.phy_cfg			= phy_cfg_gs101,
++	.phy_tunes			= gs201_tunes,
++	.phy_ops			= &gs101_usbdrd_phy_ops,
++	.pmu_offset_usbdrd0_phy		= GS101_PHY_CTRL_USB20,
++	.pmu_offset_usbdrd0_phy_ss	= GS101_PHY_CTRL_USBDP,
++	.clk_names			= gs101_clk_names,
++	.n_clks				= ARRAY_SIZE(gs101_clk_names),
++	.core_clk_names			= exynos5_core_clk_names,
++	.n_core_clks			= ARRAY_SIZE(exynos5_core_clk_names),
++	.regulator_names		= gs101_regulator_names,
++	.n_regulators			= ARRAY_SIZE(gs101_regulator_names),
++};
++
+ static const struct of_device_id exynos5_usbdrd_phy_of_match[] = {
++	{
++		.compatible = "google,gs201-usb31drd-phy",
++		.data = &gs201_usbd31rd_phy
++	},
+ 	{
+ 		.compatible = "google,gs101-usb31drd-phy",
+ 		.data = &gs101_usbd31rd_phy
+diff --git a/drivers/phy/samsung/phy-gs101-ufs.c b/drivers/phy/samsung/phy-gs101-ufs.c
+index a15e1f453..b3c9784a9 100644
+--- a/drivers/phy/samsung/phy-gs101-ufs.c
++++ b/drivers/phy/samsung/phy-gs101-ufs.c
+@@ -95,6 +95,80 @@ static const struct samsung_ufs_phy_cfg tensor_gs101_pre_init_cfg[] = {
+ 	END_UFS_PHY_CFG,
+ };
+ 
++/*
++ * gs201 PHY init, PMA entries of init_cfg_evt1 from Google's downstream
++ * gs201 UFS CAL (google-modules/soc/gs drivers/ufs/gs201/ufs-cal-if.c).
++ * Differs from gs101 in COMN 0x29 and TRSV 0x27d/0x2be.
++ */
++static const struct samsung_ufs_phy_cfg tensor_gs201_pre_init_cfg[] = {
++	PHY_COMN_REG_CFG(0x29, 0x22, PWR_MODE_ANY),
++	PHY_COMN_REG_CFG(0x43, 0x10, PWR_MODE_ANY),
++	PHY_COMN_REG_CFG(0x3C, 0x14, PWR_MODE_ANY),
++	PHY_COMN_REG_CFG(0x46, 0x48, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x200, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x201, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x202, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x203, 0x0a, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x204, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x205, 0x11, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x207, 0x0c, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2E1, 0xc0, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x22D, 0xb8, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x234, 0x60, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x238, 0x13, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x239, 0x48, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23A, 0x01, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23B, 0x25, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23C, 0x2a, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23D, 0x01, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23E, 0x13, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x23F, 0x13, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x240, 0x4a, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x243, 0x40, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x244, 0x02, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x25D, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x25E, 0x3f, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x25F, 0xff, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x273, 0x33, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x274, 0x50, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x284, 0x02, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x285, 0x02, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2A2, 0x04, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x27D, 0x01, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2FA, 0x01, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x286, 0x03, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x287, 0x03, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x288, 0x03, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x289, 0x03, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2B3, 0x04, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2B6, 0x0b, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2B7, 0x0b, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2B8, 0x0b, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2B9, 0x0b, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2BA, 0x0b, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2BB, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2BC, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2BD, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2BE, 0x06, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2E4, 0x1a, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2ED, 0x25, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x269, 0x1a, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x2F4, 0x2f, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x34B, 0x01, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x34C, 0x23, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x34D, 0x23, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x34E, 0x45, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x34F, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x350, 0x31, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x351, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x352, 0x02, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x353, 0x00, PWR_MODE_ANY),
++	PHY_TRSV_REG_CFG_GS101(0x354, 0x01, PWR_MODE_ANY),
++	PHY_COMN_REG_CFG(0x43, 0x18, PWR_MODE_ANY),
++	PHY_COMN_REG_CFG(0x43, 0x00, PWR_MODE_ANY),
++	END_UFS_PHY_CFG,
++};
++
+ static const struct samsung_ufs_phy_cfg tensor_gs101_pre_pwr_hs_config[] = {
+ 	PHY_TRSV_REG_CFG_GS101(0x369, 0x11, PWR_MODE_ANY),
+ 	PHY_TRSV_REG_CFG_GS101(0x246, 0x03, PWR_MODE_ANY),
+@@ -136,6 +210,12 @@ static const struct samsung_ufs_phy_cfg *tensor_gs101_ufs_phy_cfgs[CFG_TAG_MAX]
+ 	[CFG_POST_PWR_HS]	= tensor_gs101_post_pwr_hs_config,
+ };
+ 
++static const struct samsung_ufs_phy_cfg *tensor_gs201_ufs_phy_cfgs[CFG_TAG_MAX] = {
++	[CFG_PRE_INIT]		= tensor_gs201_pre_init_cfg,
++	[CFG_PRE_PWR_HS]	= tensor_gs101_pre_pwr_hs_config,
++	[CFG_POST_PWR_HS]	= tensor_gs101_post_pwr_hs_config,
++};
++
+ static const struct samsung_ufs_phy_cfg *tensor_gs101_hibern8_cfgs[] = {
+ 	[CFG_POST_HIBERN8_ENTER]	= tensor_gs101_post_h8_enter,
+ 	[CFG_PRE_HIBERN8_EXIT]		= tensor_gs101_pre_h8_exit,
+@@ -208,3 +288,17 @@ const struct samsung_ufs_phy_drvdata tensor_gs101_ufs_phy = {
+ 	.wait_for_cal = gs101_phy_wait_for_calibration,
+ 	.wait_for_cdr = gs101_phy_wait_for_cdr_lock,
+ };
++
++const struct samsung_ufs_phy_drvdata tensor_gs201_ufs_phy = {
++	.cfgs = tensor_gs201_ufs_phy_cfgs,
++	.cfgs_hibern8 = tensor_gs101_hibern8_cfgs,
++	.isol = {
++		.offset = TENSOR_GS101_PHY_CTRL,
++		.mask = TENSOR_GS101_PHY_CTRL_MASK,
++		.en = TENSOR_GS101_PHY_CTRL_EN,
++	},
++	.clk_list = tensor_gs101_ufs_phy_clks,
++	.num_clks = ARRAY_SIZE(tensor_gs101_ufs_phy_clks),
++	.wait_for_cal = gs101_phy_wait_for_calibration,
++	.wait_for_cdr = gs101_phy_wait_for_cdr_lock,
++};
+diff --git a/drivers/phy/samsung/phy-samsung-ufs.c b/drivers/phy/samsung/phy-samsung-ufs.c
+index ee665f26c..34e56fead 100644
+--- a/drivers/phy/samsung/phy-samsung-ufs.c
++++ b/drivers/phy/samsung/phy-samsung-ufs.c
+@@ -357,6 +357,9 @@ static const struct of_device_id samsung_ufs_phy_match[] = {
+ 	{
+ 		.compatible = "google,gs101-ufs-phy",
+ 		.data = &tensor_gs101_ufs_phy,
++	}, {
++		.compatible = "google,gs201-ufs-phy",
++		.data = &tensor_gs201_ufs_phy,
+ 	}, {
+ 		.compatible = "samsung,exynos7-ufs-phy",
+ 		.data = &exynos7_ufs_phy,
+diff --git a/drivers/phy/samsung/phy-samsung-ufs.h b/drivers/phy/samsung/phy-samsung-ufs.h
+index f2c2e744e..29ad14045 100644
+--- a/drivers/phy/samsung/phy-samsung-ufs.h
++++ b/drivers/phy/samsung/phy-samsung-ufs.h
+@@ -159,5 +159,6 @@ extern const struct samsung_ufs_phy_drvdata exynosautov9_ufs_phy;
+ extern const struct samsung_ufs_phy_drvdata exynosautov920_ufs_phy;
+ extern const struct samsung_ufs_phy_drvdata fsd_ufs_phy;
+ extern const struct samsung_ufs_phy_drvdata tensor_gs101_ufs_phy;
++extern const struct samsung_ufs_phy_drvdata tensor_gs201_ufs_phy;
+ 
+ #endif /* _PHY_SAMSUNG_UFS_ */
+diff --git a/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c b/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
+index 1aa977d2a..e8359d48f 100644
+--- a/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
++++ b/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
+@@ -2232,6 +2232,159 @@ const struct samsung_pinctrl_of_match_data gs101_of_data __initconst = {
+ 	.num_ctrl	= ARRAY_SIZE(gs101_pin_ctrl),
+ };
+ 
++/* pin banks of gs201 pin-controller (ALIVE) */
++static const struct samsung_pin_bank_data gs201_pin_alive[] = {
++	GS101_PIN_BANK_EINTW(8, 0x0, "gpa0", 0x00, 0x00),
++	GS101_PIN_BANK_EINTW(7, 0x20, "gpa1", 0x04, 0x08),
++	GS101_PIN_BANK_EINTW(4, 0x40, "gpa2", 0x08, 0x10),
++	GS101_PIN_BANK_EINTW(4, 0x60, "gpa3", 0x0c, 0x14),
++	GS101_PIN_BANK_EINTW(4, 0x80, "gpa4", 0x10, 0x18),
++	GS101_PIN_BANK_EINTW(7, 0xa0, "gpa5", 0x14, 0x1c),
++	GS101_PIN_BANK_EINTW(8, 0xc0, "gpa9", 0x18, 0x24),
++	GS101_PIN_BANK_EINTW(2, 0xe0, "gpa10", 0x1c, 0x2c),
++};
++
++/* pin banks of gs201 pin-controller (FAR_ALIVE) */
++static const struct samsung_pin_bank_data gs201_pin_far_alive[] = {
++	GS101_PIN_BANK_EINTW(8, 0x0, "gpa6", 0x00, 0x00),
++	GS101_PIN_BANK_EINTW(4, 0x20, "gpa7", 0x04, 0x08),
++	GS101_PIN_BANK_EINTW(8, 0x40, "gpa8", 0x08, 0x0c),
++	GS101_PIN_BANK_EINTW(2, 0x60, "gpa11", 0x0c, 0x14),
++};
++
++/* pin banks of gs201 pin-controller (GSACORE) */
++static const struct samsung_pin_bank_data gs201_pin_gsacore[] = {
++	GS101_PIN_BANK_EINTG(2, 0x0, "gps0", 0x00, 0x00),
++	GS101_PIN_BANK_EINTG(8, 0x20, "gps1", 0x04, 0x04),
++	GS101_PIN_BANK_EINTG(3, 0x40, "gps2", 0x08, 0x0c),
++};
++
++/* pin banks of gs201 pin-controller (GSACTRL) */
++static const struct samsung_pin_bank_data gs201_pin_gsactrl[] = {
++	GS101_PIN_BANK_EINTW(6, 0x0, "gps3", 0x00, 0x00),
++};
++
++/* pin banks of gs201 pin-controller (PERIC0) */
++static const struct samsung_pin_bank_data gs201_pin_peric0[] = {
++	GS101_PIN_BANK_EINTG(5, 0x0, "gpp0", 0x00, 0x00),
++	GS101_PIN_BANK_EINTG(4, 0x20, "gpp1", 0x04, 0x08),
++	GS101_PIN_BANK_EINTG(4, 0x40, "gpp2", 0x08, 0x0c),
++	GS101_PIN_BANK_EINTG(2, 0x60, "gpp3", 0x0c, 0x10),
++	GS101_PIN_BANK_EINTG(4, 0x80, "gpp4", 0x10, 0x14),
++	GS101_PIN_BANK_EINTG(2, 0xa0, "gpp5", 0x14, 0x18),
++	GS101_PIN_BANK_EINTG(4, 0xc0, "gpp6", 0x18, 0x1c),
++	GS101_PIN_BANK_EINTG(2, 0xe0, "gpp7", 0x1c, 0x20),
++	GS101_PIN_BANK_EINTG(4, 0x100, "gpp8", 0x20, 0x24),
++	GS101_PIN_BANK_EINTG(2, 0x120, "gpp9", 0x24, 0x28),
++	GS101_PIN_BANK_EINTG(4, 0x140, "gpp10", 0x28, 0x2c),
++	GS101_PIN_BANK_EINTG(2, 0x160, "gpp11", 0x2c, 0x30),
++	GS101_PIN_BANK_EINTG(4, 0x180, "gpp12", 0x30, 0x34),
++	GS101_PIN_BANK_EINTG(2, 0x1a0, "gpp13", 0x34, 0x38),
++	GS101_PIN_BANK_EINTG(4, 0x1c0, "gpp14", 0x38, 0x3c),
++	GS101_PIN_BANK_EINTG(2, 0x1e0, "gpp15", 0x3c, 0x40),
++	GS101_PIN_BANK_EINTG(4, 0x200, "gpp16", 0x40, 0x44),
++	GS101_PIN_BANK_EINTG(2, 0x220, "gpp17", 0x44, 0x48),
++	GS101_PIN_BANK_EINTG(4, 0x240, "gpp18", 0x48, 0x4c),
++	GS101_PIN_BANK_EINTG(5, 0x260, "gpp19", 0x4c, 0x50),
++};
++
++/* pin banks of gs201 pin-controller (PERIC1) */
++static const struct samsung_pin_bank_data gs201_pin_peric1[] = {
++	GS101_PIN_BANK_EINTG(8, 0x0, "gpp20", 0x00, 0x00),
++	GS101_PIN_BANK_EINTG(4, 0x20, "gpp21", 0x04, 0x08),
++	GS101_PIN_BANK_EINTG(2, 0x40, "gpp22", 0x08, 0x0c),
++	GS101_PIN_BANK_EINTG(8, 0x60, "gpp23", 0x0c, 0x10),
++	GS101_PIN_BANK_EINTG(4, 0x80, "gpp24", 0x10, 0x18),
++	GS101_PIN_BANK_EINTG(4, 0xa0, "gpp25", 0x14, 0x1c),
++	GS101_PIN_BANK_EINTG(5, 0xc0, "gpp26", 0x18, 0x20),
++	GS101_PIN_BANK_EINTG(4, 0xe0, "gpp27", 0x1c, 0x28),
++};
++
++/* pin banks of gs201 pin-controller (HSI1) */
++static const struct samsung_pin_bank_data gs201_pin_hsi1[] = {
++	GS101_PIN_BANK_EINTG(6, 0x0, "gph0", 0x00, 0x00),
++	GS101_PIN_BANK_EINTG(7, 0x20, "gph1", 0x04, 0x08),
++};
++
++/* pin banks of gs201 pin-controller (HSI2) */
++static const struct samsung_pin_bank_data gs201_pin_hsi2[] = {
++	GS101_PIN_BANK_EINTG(6, 0x0, "gph2", 0x00, 0x00),
++	GS101_PIN_BANK_EINTG(6, 0x20, "gph4", 0x04, 0x08),
++};
++
++/* pin banks of gs201 pin-controller (HSI2UFS) */
++static const struct samsung_pin_bank_data gs201_pin_hsi2ufs[] = {
++	GS101_PIN_BANK_EINTG(2, 0x0, "gph3", 0x00, 0x00),
++};
++
++static const struct samsung_pin_ctrl gs201_pin_ctrl[] __initconst = {
++	{
++		/* pin banks of gs201 pin-controller (ALIVE) */
++		.pin_banks	= gs201_pin_alive,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_alive),
++		.eint_wkup_init = exynos_eint_wkup_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++		.retention_data = &no_retention_data,
++	}, {
++		/* pin banks of gs201 pin-controller (FAR_ALIVE) */
++		.pin_banks	= gs201_pin_far_alive,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_far_alive),
++		.eint_wkup_init = exynos_eint_wkup_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++		.retention_data = &no_retention_data,
++	}, {
++		/* pin banks of gs201 pin-controller (GSACORE) */
++		.pin_banks	= gs201_pin_gsacore,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_gsacore),
++	}, {
++		/* pin banks of gs201 pin-controller (GSACTRL) */
++		.pin_banks	= gs201_pin_gsactrl,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_gsactrl),
++	}, {
++		/* pin banks of gs201 pin-controller (PERIC0) */
++		.pin_banks	= gs201_pin_peric0,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_peric0),
++		.eint_gpio_init = exynos_eint_gpio_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++	}, {
++		/* pin banks of gs201 pin-controller (PERIC1) */
++		.pin_banks	= gs201_pin_peric1,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_peric1),
++		.eint_gpio_init = exynos_eint_gpio_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++	}, {
++		/* pin banks of gs201 pin-controller (HSI1) */
++		.pin_banks	= gs201_pin_hsi1,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_hsi1),
++		.eint_gpio_init = exynos_eint_gpio_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++	}, {
++		/* pin banks of gs201 pin-controller (HSI2) */
++		.pin_banks	= gs201_pin_hsi2,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_hsi2),
++		.eint_gpio_init = exynos_eint_gpio_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++	}, {
++		/* pin banks of gs201 pin-controller (HSI2UFS) */
++		.pin_banks	= gs201_pin_hsi2ufs,
++		.nr_banks	= ARRAY_SIZE(gs201_pin_hsi2ufs),
++		.eint_gpio_init = exynos_eint_gpio_init,
++		.suspend	= gs101_pinctrl_suspend,
++		.resume		= gs101_pinctrl_resume,
++	},
++};
++
++const struct samsung_pinctrl_of_match_data gs201_of_data __initconst = {
++	.ctrl		= gs201_pin_ctrl,
++	.num_ctrl	= ARRAY_SIZE(gs201_pin_ctrl),
++};
++
+ /* pin banks of artpec8 pin-controller (FSYS0) */
+ static const struct samsung_pin_bank_data artpec8_pin_banks0[] __initconst = {
+ 	ARTPEC_PIN_BANK_EINTG(5, 0x000, "gpf0", 0x00),
+diff --git a/drivers/pinctrl/samsung/pinctrl-samsung.c b/drivers/pinctrl/samsung/pinctrl-samsung.c
+index 5ecc9ed4c..447a55106 100644
+--- a/drivers/pinctrl/samsung/pinctrl-samsung.c
++++ b/drivers/pinctrl/samsung/pinctrl-samsung.c
+@@ -1488,6 +1488,8 @@ static const struct of_device_id samsung_pinctrl_dt_match[] = {
+ 		.data = &artpec9_of_data },
+ 	{ .compatible = "google,gs101-pinctrl",
+ 		.data = &gs101_of_data },
++	{ .compatible = "google,gs201-pinctrl",
++		.data = &gs201_of_data },
+ 	{ .compatible = "samsung,exynos2200-pinctrl",
+ 		.data = &exynos2200_of_data },
+ 	{ .compatible = "samsung,exynos5433-pinctrl",
+diff --git a/drivers/pinctrl/samsung/pinctrl-samsung.h b/drivers/pinctrl/samsung/pinctrl-samsung.h
+index bb02fb49b..30dc4a614 100644
+--- a/drivers/pinctrl/samsung/pinctrl-samsung.h
++++ b/drivers/pinctrl/samsung/pinctrl-samsung.h
+@@ -406,6 +406,7 @@ extern const struct samsung_pinctrl_of_match_data exynosautov9_of_data;
+ extern const struct samsung_pinctrl_of_match_data exynosautov920_of_data;
+ extern const struct samsung_pinctrl_of_match_data fsd_of_data;
+ extern const struct samsung_pinctrl_of_match_data gs101_of_data;
++extern const struct samsung_pinctrl_of_match_data gs201_of_data;
+ extern const struct samsung_pinctrl_of_match_data s3c64xx_of_data;
+ extern const struct samsung_pinctrl_of_match_data s5pv210_of_data;
+ 
+diff --git a/drivers/power/supply/max77759_charger.c b/drivers/power/supply/max77759_charger.c
+index f308db3f7..059f63ab2 100644
+--- a/drivers/power/supply/max77759_charger.c
++++ b/drivers/power/supply/max77759_charger.c
+@@ -617,6 +617,19 @@ static void psy_work_item(struct work_struct *work)
+ 		goto err;
+ 	}
+ 
++	/*
++	 * TCPM reports no current limit for a Type-C "default" (USB 2.0)
++	 * source, e.g. a PC port with PD disabled; that still guarantees
++	 * 500mA, so charge at that rate rather than turning the charger off.
++	 */
++	if (online.intval && !current_limit.intval)
++		current_limit.intval = 500000;
++
++	/* OTG boost is owned by the chgin-otg regulator (TCPM vbus supply) */
++	scoped_guard(mutex, &chg->lock)
++		if (chg->mode == MAX77759_CHGR_MODE_OTG_BOOST_ON)
++			return;
++
+ 	if (online.intval && current_limit.intval) {
+ 		ret = set_input_current_limit(chg, current_limit.intval);
+ 		if (ret) {
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index 89789ac7a..fc6654e10 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1469,6 +1469,13 @@ config REGULATOR_S2MPS11
+ 	 Buck converters including Dual-Phase Buck converter, Buck-Boost
+ 	 converter, various LDOs.
+ 
++config REGULATOR_S2MPG12
++	tristate "Samsung S2MPG12 voltage regulator"
++	depends on MFD_SEC_CORE || COMPILE_TEST
++	help
++	  This driver supports the buck and LDO regulators of the Samsung
++	  S2MPG12 PMIC, the main PMIC of Google gs201 (Tensor G2) devices.
++
+ config REGULATOR_S5M8767
+ 	tristate "Samsung S5M8767A voltage regulator"
+ 	depends on MFD_SEC_CORE || COMPILE_TEST
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 5a764cec8..5ab0dc42a 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -168,6 +168,7 @@ obj-$(CONFIG_REGULATOR_RTQ6752)	+= rtq6752-regulator.o
+ obj-$(CONFIG_REGULATOR_RTQ2208) += rtq2208-regulator.o
+ obj-$(CONFIG_REGULATOR_S2DOS05) += s2dos05-regulator.o
+ obj-$(CONFIG_REGULATOR_S2MPA01) += s2mpa01.o
++obj-$(CONFIG_REGULATOR_S2MPG12) += s2mpg12-regulator.o
+ obj-$(CONFIG_REGULATOR_S2MPS11) += s2mps11.o
+ obj-$(CONFIG_REGULATOR_S5M8767) += s5m8767.o
+ obj-$(CONFIG_REGULATOR_SC2730) += sc2730-regulator.o
+diff --git a/drivers/regulator/s2mpg12-regulator.c b/drivers/regulator/s2mpg12-regulator.c
+new file mode 100644
+index 000000000..f195a6e83
+--- /dev/null
++++ b/drivers/regulator/s2mpg12-regulator.c
+@@ -0,0 +1,180 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Samsung S2MPG12 (Google gs201 main PMIC) regulator driver
++ *
++ * The PMIC is accessed through the ACPM firmware (see sec-acpm). Register
++ * layout and voltage tables are from Google's downstream s2mpg12 driver.
++ * Regulators are only switched fully on (all enable bits, "ON in normal
++ * mode") or off; external/suspend control modes are left as configured
++ * by the bootloader.
++ */
++
++#include <linux/bits.h>
++#include <linux/mfd/samsung/core.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++#include <linux/regulator/driver.h>
++
++#define S2MPG12_ENABLE_TIME_LDO		128
++#define S2MPG12_ENABLE_TIME_BUCK	130
++
++enum s2mpg12_regulator_id {
++	S2MPG12_LDO1,
++	S2MPG12_LDO2,
++	S2MPG12_LDO3,
++	S2MPG12_LDO4,
++	S2MPG12_LDO5,
++	S2MPG12_LDO6,
++	S2MPG12_LDO7,
++	S2MPG12_LDO8,
++	S2MPG12_LDO9,
++	S2MPG12_LDO10,
++	S2MPG12_LDO11,
++	S2MPG12_LDO12,
++	S2MPG12_LDO13,
++	S2MPG12_LDO14,
++	S2MPG12_LDO15,
++	S2MPG12_LDO16,
++	S2MPG12_LDO17,
++	S2MPG12_LDO18,
++	S2MPG12_LDO19,
++	S2MPG12_LDO20,
++	S2MPG12_LDO21,
++	S2MPG12_LDO22,
++	S2MPG12_LDO23,
++	S2MPG12_LDO24,
++	S2MPG12_LDO25,
++	S2MPG12_LDO26,
++	S2MPG12_LDO27,
++	S2MPG12_LDO28,
++	S2MPG12_BUCK1,
++	S2MPG12_BUCK2,
++	S2MPG12_BUCK3,
++	S2MPG12_BUCK4,
++	S2MPG12_BUCK5,
++	S2MPG12_BUCK6,
++	S2MPG12_BUCK7,
++	S2MPG12_BUCK8,
++	S2MPG12_BUCK9,
++	S2MPG12_BUCK10,
++	S2MPG12_REGULATOR_MAX,
++};
++
++static const struct regulator_ops s2mpg12_regulator_ops = {
++	.list_voltage		= regulator_list_voltage_linear,
++	.map_voltage		= regulator_map_voltage_linear,
++	.is_enabled		= regulator_is_enabled_regmap,
++	.enable			= regulator_enable_regmap,
++	.disable		= regulator_disable_regmap,
++	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
++	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
++	.set_voltage_time_sel	= regulator_set_voltage_time_sel,
++};
++
++#define S2MPG12_REG(_name, _id, _min, _step, _n, _vreg, _ereg, _emask, _time) \
++	{								\
++		.name		= _name,				\
++		.of_match	= of_match_ptr(_name),			\
++		.regulators_node = of_match_ptr("regulators"),		\
++		.id		= _id,					\
++		.ops		= &s2mpg12_regulator_ops,		\
++		.type		= REGULATOR_VOLTAGE,			\
++		.owner		= THIS_MODULE,				\
++		.min_uV		= _min,					\
++		.uV_step	= _step,				\
++		.n_voltages	= _n,					\
++		.vsel_reg	= _vreg,				\
++		.vsel_mask	= (_n) - 1,				\
++		.enable_reg	= _ereg,				\
++		.enable_mask	= _emask,				\
++		.enable_val	= _emask,				\
++		.enable_time	= _time,				\
++		.ramp_delay	= 6250,					\
++	}
++
++static const struct regulator_desc s2mpg12_regulators[] = {
++	S2MPG12_REG("ldo1m", S2MPG12_LDO1, 300000, 12500, 128, 0x2b, 0x2b, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo2m", S2MPG12_LDO2, 700000, 25000, 64, 0x2c, 0x2c, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo3m", S2MPG12_LDO3, 300000, 12500, 128, 0x2d, 0x2d, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo4m", S2MPG12_LDO4, 700000, 25000, 64, 0x2f, 0x2f, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo5m", S2MPG12_LDO5, 725000, 12500, 64, 0x30, 0x30, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo6m", S2MPG12_LDO6, 725000, 12500, 64, 0x31, 0x31, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo7m", S2MPG12_LDO7, 300000, 12500, 128, 0x32, 0x48, GENMASK(1, 0), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo8m", S2MPG12_LDO8, 725000, 12500, 64, 0x33, 0x33, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo9m", S2MPG12_LDO9, 700000, 25000, 64, 0x34, 0x34, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo10m", S2MPG12_LDO10, 1800000, 25000, 64, 0x35, 0x35, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo11m", S2MPG12_LDO11, 300000, 12500, 128, 0x36, 0x48, GENMASK(3, 2), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo12m", S2MPG12_LDO12, 300000, 12500, 128, 0x37, 0x48, GENMASK(5, 4), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo13m", S2MPG12_LDO13, 300000, 12500, 128, 0x38, 0x48, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo14m", S2MPG12_LDO14, 700000, 25000, 64, 0x39, 0x39, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo15m", S2MPG12_LDO15, 300000, 12500, 128, 0x3a, 0x49, GENMASK(1, 0), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo16m", S2MPG12_LDO16, 725000, 12500, 64, 0x3b, 0x3b, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo17m", S2MPG12_LDO17, 300000, 12500, 128, 0x3c, 0x49, GENMASK(3, 2), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo18m", S2MPG12_LDO18, 700000, 25000, 64, 0x3d, 0x3d, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo19m", S2MPG12_LDO19, 300000, 12500, 128, 0x3e, 0x49, GENMASK(5, 4), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo20m", S2MPG12_LDO20, 700000, 25000, 64, 0x3f, 0x3f, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo21m", S2MPG12_LDO21, 1800000, 25000, 64, 0x40, 0x40, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo22m", S2MPG12_LDO22, 300000, 12500, 128, 0x41, 0x49, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo23m", S2MPG12_LDO23, 700000, 25000, 64, 0x42, 0x42, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo24m", S2MPG12_LDO24, 700000, 25000, 64, 0x43, 0x43, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo25m", S2MPG12_LDO25, 700000, 25000, 64, 0x44, 0x44, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo26m", S2MPG12_LDO26, 1800000, 25000, 64, 0x45, 0x45, GENMASK(7, 6), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo27m", S2MPG12_LDO27, 1800000, 25000, 64, 0x46, 0x46, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("ldo28m", S2MPG12_LDO28, 725000, 12500, 64, 0x47, 0x47, BIT(7), S2MPG12_ENABLE_TIME_LDO),
++	S2MPG12_REG("buck1m", S2MPG12_BUCK1, 200000, 6250, 256, 0x18, 0x17, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck2m", S2MPG12_BUCK2, 200000, 6250, 256, 0x1a, 0x19, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck3m", S2MPG12_BUCK3, 200000, 6250, 256, 0x1c, 0x1b, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck4m", S2MPG12_BUCK4, 200000, 6250, 256, 0x1e, 0x1d, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck5m", S2MPG12_BUCK5, 200000, 6250, 256, 0x20, 0x1f, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck6m", S2MPG12_BUCK6, 200000, 6250, 256, 0x22, 0x21, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck7m", S2MPG12_BUCK7, 200000, 6250, 256, 0x24, 0x23, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck8m", S2MPG12_BUCK8, 200000, 6250, 256, 0x26, 0x25, BIT(7), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck9m", S2MPG12_BUCK9, 200000, 6250, 256, 0x28, 0x27, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++	S2MPG12_REG("buck10m", S2MPG12_BUCK10, 200000, 6250, 256, 0x2a, 0x29, GENMASK(7, 6), S2MPG12_ENABLE_TIME_BUCK),
++};
++
++static int s2mpg12_regulator_probe(struct platform_device *pdev)
++{
++	struct sec_pmic_dev *iodev = dev_get_drvdata(pdev->dev.parent);
++	struct regulator_config config = { };
++	unsigned int i;
++
++	device_set_of_node_from_dev(&pdev->dev, pdev->dev.parent);
++
++	config.dev = &pdev->dev;
++	config.regmap = iodev->regmap_pmic;
++
++	for (i = 0; i < ARRAY_SIZE(s2mpg12_regulators); i++) {
++		struct regulator_dev *rdev;
++
++		rdev = devm_regulator_register(&pdev->dev,
++					       &s2mpg12_regulators[i], &config);
++		if (IS_ERR(rdev))
++			return dev_err_probe(&pdev->dev, PTR_ERR(rdev),
++					     "failed to register %s\n",
++					     s2mpg12_regulators[i].name);
++	}
++
++	return 0;
++}
++
++static const struct platform_device_id s2mpg12_regulator_id[] = {
++	{ "s2mpg12-regulator" },
++	{ }
++};
++MODULE_DEVICE_TABLE(platform, s2mpg12_regulator_id);
++
++static struct platform_driver s2mpg12_regulator_driver = {
++	.driver = {
++		.name = "s2mpg12-regulator",
++		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
++	},
++	.probe = s2mpg12_regulator_probe,
++	.id_table = s2mpg12_regulator_id,
++};
++module_platform_driver(s2mpg12_regulator_driver);
++
++MODULE_DESCRIPTION("Samsung S2MPG12 regulator driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/soc/samsung/Makefile b/drivers/soc/samsung/Makefile
+index 636a76260..b9dbbdf30 100644
+--- a/drivers/soc/samsung/Makefile
++++ b/drivers/soc/samsung/Makefile
+@@ -14,3 +14,4 @@ obj-$(CONFIG_EXYNOS_PMU_ARM_DRIVERS)	+= exynos3250-pmu.o exynos4-pmu.o \
+ obj-$(CONFIG_EXYNOS_REGULATOR_COUPLER) += exynos-regulator-coupler.o
+ 
+ obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o
++obj-$(CONFIG_EXYNOS_PMU)		+= gs201-fb-refresh.o
+diff --git a/drivers/soc/samsung/gs201-fb-refresh.c b/drivers/soc/samsung/gs201-fb-refresh.c
+new file mode 100644
+index 000000000..87928597a
+--- /dev/null
++++ b/drivers/soc/samsung/gs201-fb-refresh.c
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * gs201 bring-up aid: put the bootloader-initialised DECON0 into continuous
++ * refresh so the simple-framebuffer console is visible from early boot,
++ * including panics. Same write the initramfs display hook does.
++ */
++
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/of.h>
++
++#define GS201_DECON0_TRIG_CON	0x1c240030
++#define GS201_DECON0_TRIG_VAL	0x3061
++
++static int __init gs201_fb_refresh_init(void)
++{
++	void __iomem *reg;
++
++	if (!of_machine_is_compatible("google,gs201"))
++		return 0;
++
++	reg = ioremap(GS201_DECON0_TRIG_CON, 4);
++	if (!reg)
++		return -ENOMEM;
++	writel(GS201_DECON0_TRIG_VAL, reg);
++	iounmap(reg);
++	return 0;
++}
++early_initcall(gs201_fb_refresh_init);
+diff --git a/drivers/thermal/samsung/Kconfig b/drivers/thermal/samsung/Kconfig
+index e1e8035d2..0e70d20ba 100644
+--- a/drivers/thermal/samsung/Kconfig
++++ b/drivers/thermal/samsung/Kconfig
+@@ -10,3 +10,11 @@ config EXYNOS_THERMAL
+ 	  the TMU, reports temperature and handles cooling action if defined.
+ 	  This driver uses the Exynos core thermal APIs and TMU configuration
+ 	  data from the supported SoCs.
++
++config EXYNOS_ACPM_THERMAL
++	tristate "Thermal sensors behind the Exynos ACPM firmware"
++	depends on THERMAL_OF
++	depends on EXYNOS_ACPM_PROTOCOL
++	help
++	  Exposes the TMU sensors that Google Tensor SoCs read through the
++	  ACPM firmware as thermal zones, so CPU cooling can be applied.
+diff --git a/drivers/thermal/samsung/Makefile b/drivers/thermal/samsung/Makefile
+index f13940715..e4a72b6c6 100644
+--- a/drivers/thermal/samsung/Makefile
++++ b/drivers/thermal/samsung/Makefile
+@@ -4,3 +4,4 @@
+ #
+ obj-$(CONFIG_EXYNOS_THERMAL)			+= exynos_thermal.o
+ exynos_thermal-y				:= exynos_tmu.o
++obj-$(CONFIG_EXYNOS_ACPM_THERMAL)		+= acpm_tmu.o
+diff --git a/drivers/thermal/samsung/acpm_tmu.c b/drivers/thermal/samsung/acpm_tmu.c
+new file mode 100644
+index 000000000..093ef61b4
+--- /dev/null
++++ b/drivers/thermal/samsung/acpm_tmu.c
+@@ -0,0 +1,123 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Thermal sensors behind the ACPM firmware (Google Tensor gs201)
++ *
++ * The TMU on gs101/gs201 is owned by the APM; temperatures are read through
++ * the ACPM TMU protocol. This driver polls them and exposes each sensor that
++ * has a DT thermal zone, so the thermal core can apply cooling.
++ */
++
++#include <linux/firmware/samsung/exynos-acpm-protocol.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/thermal.h>
++#include <linux/units.h>
++
++#define ACPM_TMU_MAX_SENSORS	8
++
++struct acpm_tmu_data {
++	unsigned int acpm_chan_id;
++	unsigned int nr_sensors;
++};
++
++struct acpm_tmu_sensor {
++	struct acpm_tmu *tmu;
++	u8 id;
++};
++
++struct acpm_tmu {
++	struct device *dev;
++	struct acpm_handle *handle;
++	const struct acpm_tmu_data *data;
++	struct acpm_tmu_sensor sensors[ACPM_TMU_MAX_SENSORS];
++};
++
++static int acpm_tmu_get_temp(struct thermal_zone_device *tz, int *temp)
++{
++	struct acpm_tmu_sensor *s = thermal_zone_device_priv(tz);
++	struct acpm_tmu *tmu = s->tmu;
++	int ret, t;
++
++	ret = tmu->handle->ops->tmu.read_temp(tmu->handle,
++					      tmu->data->acpm_chan_id,
++					      s->id, &t);
++	if (ret)
++		return ret;
++
++	*temp = t * MILLIDEGREE_PER_DEGREE;
++
++	return 0;
++}
++
++static const struct thermal_zone_device_ops acpm_tmu_ops = {
++	.get_temp = acpm_tmu_get_temp,
++};
++
++static int acpm_tmu_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct thermal_zone_device *tzd;
++	struct acpm_tmu *tmu;
++	unsigned int i, found = 0;
++	int ret;
++
++	tmu = devm_kzalloc(dev, sizeof(*tmu), GFP_KERNEL);
++	if (!tmu)
++		return -ENOMEM;
++
++	tmu->dev = dev;
++	tmu->data = of_device_get_match_data(dev);
++
++	tmu->handle = devm_acpm_get_by_node(dev, dev->parent->of_node);
++	if (IS_ERR(tmu->handle))
++		return dev_err_probe(dev, PTR_ERR(tmu->handle),
++				     "failed to get acpm\n");
++
++	ret = tmu->handle->ops->tmu.init(tmu->handle, tmu->data->acpm_chan_id);
++	if (ret)
++		return dev_err_probe(dev, ret, "TMU init failed\n");
++
++	for (i = 0; i < tmu->data->nr_sensors; i++) {
++		struct acpm_tmu_sensor *s = &tmu->sensors[i];
++
++		s->tmu = tmu;
++		s->id = i;
++
++		tzd = devm_thermal_of_zone_register(dev, i, s, &acpm_tmu_ops);
++		if (IS_ERR(tzd)) {
++			if (PTR_ERR(tzd) == -ENODEV)
++				continue;
++			return dev_err_probe(dev, PTR_ERR(tzd),
++					     "failed to register sensor %u\n", i);
++		}
++		found++;
++	}
++
++	dev_info(dev, "%u thermal zone(s) registered\n", found);
++
++	return 0;
++}
++
++static const struct acpm_tmu_data gs201_acpm_tmu = {
++	.acpm_chan_id = 9,
++	.nr_sensors = 7,
++};
++
++static const struct of_device_id acpm_tmu_of_match[] = {
++	{ .compatible = "google,gs201-acpm-tmu", .data = &gs201_acpm_tmu },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, acpm_tmu_of_match);
++
++static struct platform_driver acpm_tmu_driver = {
++	.driver = {
++		.name = "acpm-tmu",
++		.of_match_table = acpm_tmu_of_match,
++	},
++	.probe = acpm_tmu_probe,
++};
++module_platform_driver(acpm_tmu_driver);
++
++MODULE_DESCRIPTION("ACPM firmware thermal sensor driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+index b2f65c465..e7f2a41fa 100644
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -243,6 +243,24 @@ static int gs101_ufs_drv_init(struct exynos_ufs *ufs)
+ 	return exynos_ufs_shareability(ufs);
+ }
+ 
++/* bring-up: allow disabling clock gating / hibern8-with-gating on gs201 */
++static bool clk_gating = true;
++module_param(clk_gating, bool, 0644);
++MODULE_PARM_DESC(clk_gating, "gs201: enable UFS clock gating and hibern8 with gating");
++
++static int gs201_ufs_drv_init(struct exynos_ufs *ufs)
++{
++	struct ufs_hba *hba = ufs->hba;
++	int ret = gs101_ufs_drv_init(ufs);
++
++	if (!clk_gating) {
++		hba->caps &= ~(UFSHCD_CAP_CLK_GATING |
++			       UFSHCD_CAP_HIBERN8_WITH_CLK_GATING);
++		dev_info(hba->dev, "clock gating disabled (clk_gating=0)\n");
++	}
++	return ret;
++}
++
+ static int exynosauto_ufs_drv_init(struct exynos_ufs *ufs)
+ {
+ 	return exynos_ufs_shareability(ufs);
+@@ -927,7 +945,8 @@ static int exynos_ufs_pre_pwr_mode(struct ufs_hba *hba,
+ 		ufs->drv_data->pre_pwr_change(ufs, dev_req_params);
+ 
+ 	if (ufshcd_is_hs_mode(dev_req_params)) {
+-		exynos_ufs_config_sync_pattern_mask(ufs, dev_req_params);
++		if (!(ufs->opts & EXYNOS_UFS_OPT_SKIP_SYNC_PATTERN_MASK))
++			exynos_ufs_config_sync_pattern_mask(ufs, dev_req_params);
+ 
+ 		switch (dev_req_params->hs_rate) {
+ 		case PA_HS_MODE_A:
+@@ -1169,6 +1188,9 @@ static void exynos_ufs_fit_aggr_timeout(struct exynos_ufs *ufs)
+ 	}
+ 
+ 	val = exynos_ufs_calc_time_cntr(ufs, IATOVAL_NSEC / CNTR_DIV_VAL);
++	/* tick is mclk when IA_TICK_SEL is set; downstream gs201 uses mclk/1MHz */
++	if (ufs->opts & EXYNOS_UFS_OPT_TIMER_TICK_USES_MCLK)
++		val = ufs->mclk_rate / 1000000;
+ 	hci_writel(ufs, val & CNT_VAL_1US_MASK, HCI_1US_TO_CNT_VAL);
+ }
+ 
+@@ -1359,6 +1381,11 @@ struct fmp_sg_entry {
+ #define SMU_INIT			0
+ #define CFG_DESCTYPE_3			3
+ 
++/* gs201 bring-up: allow skipping FMP (inline crypto) setup for testing */
++static bool fmp_enable = true;
++module_param(fmp_enable, bool, 0644);
++MODULE_PARM_DESC(fmp_enable, "Enable FMP inline encryption setup (default: true)");
++
+ static void exynos_ufs_fmp_init(struct ufs_hba *hba, struct exynos_ufs *ufs)
+ {
+ 	struct blk_crypto_profile *profile = &hba->crypto_profile;
+@@ -1389,6 +1416,11 @@ static void exynos_ufs_fmp_init(struct ufs_hba *hba, struct exynos_ufs *ufs)
+ 	if (!(ufs->opts & EXYNOS_UFS_OPT_UFSPR_SECURE))
+ 		return;
+ 
++	if (!fmp_enable) {
++		dev_info(hba->dev, "FMP setup skipped (fmp_enable=0)\n");
++		return;
++	}
++
+ 	/*
+ 	 * This call (which sets DESCTYPE to 0x3 in the FMPSECURITY0 register)
+ 	 * is needed to make the hardware use the larger PRDT entry size.
+@@ -1756,6 +1788,11 @@ static int exynos_ufs_link_startup_notify(struct ufs_hba *hba,
+ 	return ret;
+ }
+ 
++/* bring-up: -1 = no limit, 0 = PWM only, 1..4 = max HS gear */
++static int max_hs_gear = -1;
++module_param(max_hs_gear, int, 0644);
++MODULE_PARM_DESC(max_hs_gear, "Limit UFS power mode: -1 none, 0 PWM, 1-4 max HS gear");
++
+ static int exynos_ufs_negotiate_pwr_mode(struct ufs_hba *hba,
+ 					 const struct ufs_pa_layer_attr *dev_max_params,
+ 					 struct ufs_pa_layer_attr *dev_req_params)
+@@ -1767,6 +1804,14 @@ static int exynos_ufs_negotiate_pwr_mode(struct ufs_hba *hba,
+ 	/* This driver only support symmetric gear setting e.g. hs_tx_gear == hs_rx_gear */
+ 	host_params.hs_tx_gear = exynos_ufs_get_hs_gear(hba);
+ 	host_params.hs_rx_gear = exynos_ufs_get_hs_gear(hba);
++	ufshcd_parse_gear_limits(hba, &host_params);
++
++	if (max_hs_gear == 0) {
++		host_params.desired_working_mode = UFS_PWM_MODE;
++	} else if (max_hs_gear > 0) {
++		host_params.hs_tx_gear = min_t(u32, host_params.hs_tx_gear, max_hs_gear);
++		host_params.hs_rx_gear = min_t(u32, host_params.hs_rx_gear, max_hs_gear);
++	}
+ 
+ 	return ufshcd_negotiate_pwr_params(&host_params, dev_max_params, dev_req_params);
+ }
+@@ -2066,6 +2111,68 @@ static int gs101_ufs_pre_link(struct exynos_ufs *ufs)
+ 	return 0;
+ }
+ 
++/*
++ * As gs101, plus the extra PCS settings from Google's gs201 UFS CAL
++ * (init_cfg_evt1: PCS_COMN 0x202, PCS_RX 0x76/0x9e/0x9f).
++ */
++static int gs201_ufs_pre_link(struct exynos_ufs *ufs)
++{
++	struct ufs_hba *hba = ufs->hba;
++	int i;
++	u32 tx_line_reset_period, rx_line_reset_period;
++
++	rx_line_reset_period = (RX_LINE_RESET_TIME * ufs->mclk_rate)
++				/ NSEC_PER_MSEC;
++	tx_line_reset_period = (TX_LINE_RESET_TIME * ufs->mclk_rate)
++				/ NSEC_PER_MSEC;
++
++	unipro_writel(ufs, get_mclk_period_unipro_18(ufs), COMP_CLK_PERIOD);
++
++	ufshcd_dme_set(hba, UIC_ARG_MIB(0x200), 0x40);
++	/* 38.4 MHz reference clock (PMA side is set by the PHY driver) */
++	ufshcd_dme_set(hba, UIC_ARG_MIB(0x202), 0x02);
++
++	for_each_ufs_rx_lane(ufs, i) {
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_RX_CLK_PRD, i),
++			       DIV_ROUND_UP(NSEC_PER_SEC, ufs->mclk_rate));
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_RX_CLK_PRD_EN, i), 0x0);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_RX_LINERESET_VALUE2, i),
++			       (rx_line_reset_period >> 16) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_RX_LINERESET_VALUE1, i),
++			       (rx_line_reset_period >> 8) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_RX_LINERESET_VALUE0, i),
++			       (rx_line_reset_period) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(0x2f, i), 0x69);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(0x84, i), 0x1);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(0x25, i), 0xf6);
++	}
++
++	for_each_ufs_tx_lane(ufs, i) {
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_TX_CLK_PRD, i),
++			       DIV_ROUND_UP(NSEC_PER_SEC, ufs->mclk_rate));
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_TX_CLK_PRD_EN, i),
++			       0x02);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_TX_LINERESET_PVALUE2, i),
++			       (tx_line_reset_period >> 16) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_TX_LINERESET_PVALUE1, i),
++			       (tx_line_reset_period >> 8) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(VND_TX_LINERESET_PVALUE0, i),
++			       (tx_line_reset_period) & 0xFF);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(0x04, i), 1);
++		ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(0x7F, i), 0);
++	}
++
++	ufshcd_dme_set(hba, UIC_ARG_MIB(0x200), 0x0);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_LOCAL_TX_LCC_ENABLE), 0x0);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(N_DEVICEID), 0x0);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(N_DEVICEID_VALID), 0x1);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(T_PEERDEVICEID), 0x1);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(T_CONNECTIONSTATE), CPORT_CONNECTED);
++	ufshcd_dme_set(hba, UIC_ARG_MIB(0xA006), 0x8000);
++
++	return 0;
++}
++
+ static int gs101_ufs_post_link(struct exynos_ufs *ufs)
+ {
+ 	struct ufs_hba *hba = ufs->hba;
+@@ -2101,6 +2208,7 @@ static int gs101_ufs_pre_pwr_change(struct exynos_ufs *ufs,
+ 	return 0;
+ }
+ 
++
+ static const struct ufs_hba_variant_ops ufs_hba_exynos_ops = {
+ 	.name				= "exynos_ufs",
+ 	.init				= exynos_ufs_init,
+@@ -2294,6 +2402,29 @@ static const struct exynos_ufs_drv_data gs101_ufs_drvs = {
+ 	.suspend		= gs101_ufs_suspend,
+ };
+ 
++/*
++ * gs201 fixed the PRDT granularity, request list clear, OCS and interrupt
++ * aggregation reset issues (downstream: "fixed-prdt-req_list-ocs").
++ */
++static const struct exynos_ufs_drv_data gs201_ufs_drvs = {
++	.uic_attr		= &gs101_uic_attr,
++	.quirks			= UFSHCI_QUIRK_SKIP_MANUAL_WB_FLUSH_CTRL |
++				  UFSHCD_QUIRK_SKIP_DEF_UNIPRO_TIMEOUT_SETTING,
++	.opts			= EXYNOS_UFS_OPT_SKIP_CONFIG_PHY_ATTR |
++				  EXYNOS_UFS_OPT_UFSPR_SECURE |
++				  EXYNOS_UFS_OPT_TIMER_TICK_SELECT |
++				  EXYNOS_UFS_OPT_TIMER_TICK_USES_MCLK |
++				  EXYNOS_UFS_OPT_SKIP_SYNC_PATTERN_MASK |
++				  /* downstream keeps HCI core clock auto-gating off */
++				  EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL,
++	.iocc_mask		= UFS_GS101_SHARABLE,
++	.drv_init		= gs201_ufs_drv_init,
++	.pre_link		= gs201_ufs_pre_link,
++	.post_link		= gs101_ufs_post_link,
++	.pre_pwr_change		= gs101_ufs_pre_pwr_change,
++	.suspend		= gs101_ufs_suspend,
++};
++
+ static const struct exynos_ufs_drv_data exynosautov920_ufs_drvs = {
+ 	.uic_attr               = &exynos7_uic_attr,
+ 	.quirks                 = UFSHCD_QUIRK_SKIP_DEF_UNIPRO_TIMEOUT_SETTING,
+@@ -2312,6 +2443,8 @@ static const struct exynos_ufs_drv_data exynosautov920_ufs_drvs = {
+ static const struct of_device_id exynos_ufs_of_match[] = {
+ 	{ .compatible = "google,gs101-ufs",
+ 	  .data	      = &gs101_ufs_drvs },
++	{ .compatible = "google,gs201-ufs",
++	  .data	      = &gs201_ufs_drvs },
+ 	{ .compatible = "samsung,exynos7-ufs",
+ 	  .data	      = &exynos_ufs_drvs },
+ 	{ .compatible = "samsung,exynosautov9-ufs",
+diff --git a/drivers/ufs/host/ufs-exynos.h b/drivers/ufs/host/ufs-exynos.h
+index abe7e4727..de6729e84 100644
+--- a/drivers/ufs/host/ufs-exynos.h
++++ b/drivers/ufs/host/ufs-exynos.h
+@@ -245,6 +245,8 @@ struct exynos_ufs {
+ #define EXYNOS_UFS_OPT_SKIP_CONFIG_PHY_ATTR	BIT(5)
+ #define EXYNOS_UFS_OPT_UFSPR_SECURE		BIT(6)
+ #define EXYNOS_UFS_OPT_TIMER_TICK_SELECT	BIT(7)
++#define EXYNOS_UFS_OPT_TIMER_TICK_USES_MCLK	BIT(8)
++#define EXYNOS_UFS_OPT_SKIP_SYNC_PATTERN_MASK	BIT(9)
+ };
+ 
+ #define for_each_ufs_rx_lane(ufs, i) \
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+index fd5c2cd36..420bca69e 100644
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -162,6 +162,8 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy)
+ }
+ EXPORT_SYMBOL_GPL(dwc3_set_prtcap);
+ 
++static int dwc3_core_init_for_resume(struct dwc3 *dwc);
++
+ static void __dwc3_set_mode(struct work_struct *work)
+ {
+ 	struct dwc3 *dwc = work_to_dwc(work);
+@@ -169,6 +171,7 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	int ret;
+ 	u32 reg;
+ 	u32 desired_dr_role;
++	u32 prev_dr_role = 0;
+ 	int i;
+ 
+ 	mutex_lock(&dwc->mutex);
+@@ -187,6 +190,8 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 	if (desired_dr_role == dwc->current_dr_role)
+ 		goto out;
+ 
++	prev_dr_role = dwc->current_dr_role;
++
+ 	if (desired_dr_role == DWC3_GCTL_PRTCAP_OTG && dwc->edev)
+ 		goto out;
+ 
+@@ -261,6 +266,21 @@ static void __dwc3_set_mode(struct work_struct *work)
+ 		}
+ 		break;
+ 	case DWC3_GCTL_PRTCAP_DEVICE:
++		/*
++		 * Some cores (e.g. gs201) don't answer control requests after
++		 * a host -> device switch unless fully re-initialized.
++		 */
++		if (dwc->reinit_on_host_exit &&
++		    prev_dr_role == DWC3_GCTL_PRTCAP_HOST) {
++			dwc3_core_exit(dwc);
++			ret = dwc3_core_init_for_resume(dwc);
++			if (ret)
++				dev_err(dwc->dev, "failed to reinit core: %d\n", ret);
++			spin_lock_irqsave(&dwc->lock, flags);
++			dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE, false);
++			spin_unlock_irqrestore(&dwc->lock, flags);
++		}
++
+ 		dwc3_core_soft_reset(dwc);
+ 
+ 		dwc3_event_buffers_setup(dwc);
+@@ -1874,6 +1894,9 @@ static void dwc3_get_properties(struct dwc3 *dwc)
+ 	dwc->dis_split_quirk = device_property_read_bool(dev,
+ 				"snps,dis-split-quirk");
+ 
++	dwc->reinit_on_host_exit = device_property_read_bool(dev,
++				"snps,reinit-on-host-exit");
++
+ 	dwc->lpm_nyet_threshold = lpm_nyet_threshold;
+ 	dwc->tx_de_emphasis = tx_de_emphasis;
+ 
+diff --git a/drivers/usb/dwc3/core.h b/drivers/usb/dwc3/core.h
+index f3dabb37f..a00e359f1 100644
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1433,6 +1433,7 @@ struct dwc3 {
+ 	unsigned		dis_metastability_quirk:1;
+ 
+ 	unsigned		dis_split_quirk:1;
++	unsigned		reinit_on_host_exit:1;
+ 	unsigned		enable_usb2_transceiver_delay:1;
+ 	unsigned		async_callbacks:1;
+ 	unsigned		sys_wakeup:1;
+diff --git a/include/dt-bindings/clock/google,gs201.h b/include/dt-bindings/clock/google,gs201.h
+new file mode 100644
+index 000000000..394e38179
+--- /dev/null
++++ b/include/dt-bindings/clock/google,gs201.h
+@@ -0,0 +1,107 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Minimal gs201 clock IDs, generated from Google's gs201 CAL data.
++ */
++
++#ifndef _DT_BINDINGS_CLOCK_GOOGLE_GS201_H
++#define _DT_BINDINGS_CLOCK_GOOGLE_GS201_H
++
++/* CMU_TOP */
++#define CLK_GS201_CLKCMU_HSI2_NOC	1
++#define CLK_GS201_GATE_CLKCMU_HSI2_NOC	2
++#define CLK_GS201_MUX_CLKCMU_HSI2_NOC	3
++#define CLK_GS201_PLL_SHARED0_DIV4	4
++#define CLK_GS201_PLL_SHARED0_DIV2	5
++#define CLK_GS201_PLL_SHARED0	6
++#define CLK_GS201_MOUT_PLL_SHARED0	7
++#define CLK_GS201_PLL_SHARED1_DIV4	8
++#define CLK_GS201_PLL_SHARED1_DIV2	9
++#define CLK_GS201_PLL_SHARED1	10
++#define CLK_GS201_MOUT_PLL_SHARED1	11
++#define CLK_GS201_PLL_SHARED2_DIV2	12
++#define CLK_GS201_PLL_SHARED2	13
++#define CLK_GS201_MOUT_PLL_SHARED2	14
++#define CLK_GS201_PLL_SHARED3_DIV2	15
++#define CLK_GS201_PLL_SHARED3	16
++#define CLK_GS201_MOUT_PLL_SHARED3	17
++#define CLK_GS201_PLL_SPARE	18
++#define CLK_GS201_MOUT_PLL_SPARE	19
++#define CLK_GS201_CLKCMU_HSI2_UFS_EMBD	20
++#define CLK_GS201_GATE_CLKCMU_HSI2_UFS_EMBD	21
++#define CLK_GS201_MUX_CLKCMU_HSI2_UFS_EMBD	22
++#define CLK_GS201_CLKCMU_HSI0_NOC	23
++#define CLK_GS201_GATE_CLKCMU_HSI0_NOC	24
++#define CLK_GS201_MUX_CLKCMU_HSI0_NOC	25
++#define CLK_GS201_CLKCMU_HSI0_USB31DRD	26
++#define CLK_GS201_GATE_CLKCMU_HSI0_USB31DRD	27
++#define CLK_GS201_MUX_CLKCMU_HSI0_USB31DRD	28
++#define CLK_GS201_CLKCMU_PERIC1_IP	29
++#define CLK_GS201_GATE_CLKCMU_PERIC1_IP	30
++#define CLK_GS201_MUX_CLKCMU_PERIC1_IP	31
++#define CLK_GS201_CLKCMU_PERIC1_NOC	32
++#define CLK_GS201_GATE_CLKCMU_PERIC1_NOC	33
++#define CLK_GS201_MUX_CLKCMU_PERIC1_NOC	34
++
++/* CMU_HSI2 */
++#define CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_ACLK	1
++#define CLK_GS201_MUX_CLKCMU_HSI2_NOC_USER	2
++#define CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_CLK_UNIPRO	3
++#define CLK_GS201_MUX_CLKCMU_HSI2_UFS_EMBD_USER	4
++#define CLK_GS201_GOUT_BLK_HSI2_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK	5
++#define CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_ACLK	6
++#define CLK_GS201_GOUT_BLK_HSI2_UID_QE_UFS_EMBD_HSI2_IPCLKPORT_PCLK	7
++#define CLK_GS201_GOUT_BLK_HSI2_UID_SYSREG_HSI2_IPCLKPORT_PCLK	8
++
++/* CMU_HSI0 */
++#define CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_ACLK_PHYCTRL	1
++#define CLK_GS201_MUX_CLK_HSI0_NOC	2
++#define CLK_GS201_MUX_CLKCMU_HSI0_NOC_USER	3
++#define CLK_GS201_MUX_CLKCMU_HSI0_ALT_USER	4
++#define CLK_GS201_CLK_HSI0_ALT	5
++#define CLK_GS201_I_CLK_HSI0_ALT	6
++#define CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB20_PHY_REFCLK_26	7
++#define CLK_GS201_MUX_CLK_HSI0_USB20_REF	8
++#define CLK_GS201_DIV_CLK_HSI0_USB	9
++#define CLK_GS201_PLL_USB	10
++#define CLK_GS201_MOUT_PLL_USB	11
++#define CLK_GS201_MUX_CLKCMU_HSI0_TCXO_USER	12
++#define CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_ACLK	13
++#define CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_CTRL_IPCLKPORT_PCLK	14
++#define CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USBDPPHY_SCL_APB_PCLK	15
++#define CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_BUS_CLK_EARLY	16
++#define CLK_GS201_CLK_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_SUSPEND_CLK_26	17
++#define CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_ACLK	18
++#define CLK_GS201_GOUT_BLK_HSI0_UID_UASC_HSI0_LINK_IPCLKPORT_PCLK	19
++#define CLK_GS201_GOUT_BLK_HSI0_UID_USB31DRD_IPCLKPORT_I_USB31DRD_REF_CLK_40	20
++#define CLK_GS201_MUX_CLK_HSI0_USB31DRD	21
++#define CLK_GS201_MUX_CLKCMU_HSI0_USB31DRD_USER	22
++#define CLK_GS201_DIV_CLK_HSI0_USB31DRD	23
++#define CLK_GS201_MUX_CLKCMU_HSI0_USB20_USER	24
++#define CLK_GS201_USB20PHY_PHY_CLOCK	25
++#define CLK_GS201_GOUT_BLK_HSI0_UID_SYSREG_HSI0_IPCLKPORT_PCLK	26
++
++/* CMU_PERIC1 */
++#define CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_IPCLK	1
++#define CLK_GS201_DIV_CLK_PERIC1_USI0_USI	2
++#define CLK_GS201_MUX_CLKCMU_PERIC1_USI0_USI_USER	3
++#define CLK_GS201_CLK_BLK_PERIC1_UID_USI0_USI_IPCLKPORT_PCLK	4
++#define CLK_GS201_MUX_CLKCMU_PERIC1_NOC_USER	5
++#define CLK_GS201_GOUT_BLK_PERIC1_UID_SYSREG_PERIC1_IPCLKPORT_PCLK	6
++#define CLK_GS201_GOUT_BLK_PERIC1_UID_GPIO_PERIC1_IPCLKPORT_PCLK	7
++#define CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_IPCLK	8
++#define CLK_GS201_DIV_CLK_PERIC1_USI13_USI	9
++#define CLK_GS201_MUX_CLKCMU_PERIC1_USI13_USI_USER	10
++#define CLK_GS201_CLK_BLK_PERIC1_UID_USI13_USI_IPCLKPORT_PCLK	11
++
++/* CMU_APM */
++#define CLK_GS201_GOUT_BLK_APM_UID_MAILBOX_APM_AP_IPCLKPORT_PCLK	1
++#define CLK_GS201_GATE_CLKCMU_APM_FUNC	2
++#define CLK_GS201_MUX_CLKCMU_APM_FUNC	3
++#define CLK_GS201_MUX_CLKCMU_APM_FUNCSRC	4
++#define CLK_GS201_PLL_ALV_DIV2_APM	5
++#define CLK_GS201_PLL_ALV_DIV4_APM	6
++#define CLK_GS201_PLL_ALV_DIV16_APM	7
++#define CLK_GS201_PLL_ALV_DIV8_APM	8
++#define CLK_GS201_PAD_CLK_APM	9
++
++#endif
+diff --git a/include/linux/mfd/samsung/core.h b/include/linux/mfd/samsung/core.h
+index 6191f409d..053e453cc 100644
+--- a/include/linux/mfd/samsung/core.h
++++ b/include/linux/mfd/samsung/core.h
+@@ -48,6 +48,7 @@ enum sec_device_type {
+ 	S2MPU02,
+ 	S2MPU05,
+ 	S2MU005,
++	S2MPG12,
+ };
+ 
+ /**

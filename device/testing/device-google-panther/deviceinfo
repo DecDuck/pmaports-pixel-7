@@ -1,0 +1,30 @@
+# Reference: <https://nura.eco/deviceinfo>
+# Please use double quotes only. You can source this file in shell
+# scripts.
+
+deviceinfo_format_version="0"
+deviceinfo_name="Google Pixel 7"
+deviceinfo_manufacturer="Google"
+deviceinfo_codename="google-panther"
+deviceinfo_year="2022"
+deviceinfo_dtb="exynos/google/gs201-panther"
+deviceinfo_arch="aarch64"
+
+# Device related
+deviceinfo_chassis="handset"
+deviceinfo_drm="true"
+
+# Bootloader related
+deviceinfo_flash_method="fastboot"
+deviceinfo_flash_fastboot_partition_vbmeta="vbmeta"
+deviceinfo_generate_bootimg="true"
+deviceinfo_flash_pagesize="4096"
+deviceinfo_header_version="4"
+
+# The Android 16 bootloader (cloudripper-16.x) loads the DTB from
+# vendor_kernel_boot and unpacks init_boot's ramdisk last, overriding /init.
+# pmbootstrap can't flash these, so after "pmbootstrap flasher flash_kernel":
+#   fastboot flash vendor_kernel_boot <rootfs>/boot/vendor_boot.img
+#   fastboot flash init_boot <empty v4 init_boot image>
+
+deviceinfo_rootfs_image_sector_size="4096"
