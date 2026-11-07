@@ -1,0 +1,29 @@
+diff -ruN a/data/devices/display-panels/google,gs201-panther.json gmobile-0.7.4/data/devices/display-panels/google,gs201-panther.json
+--- a/data/devices/display-panels/google,gs201-panther.json	1970-01-01 10:00:00.000000000 +1000
++++ b/data/devices/display-panels/google,gs201-panther.json	2026-11-07 21:08:02.588052471 +1100
+@@ -0,0 +1,14 @@
++{
++    "name": "Google Pixel 7",
++    "x-res": 1080,
++    "y-res": 2400,
++    "width": 66,
++    "height": 147,
++    "corner-radii": [47, 47, 48, 48],
++    "cutouts": [
++        {
++            "name": "punch-hole",
++            "path": "M 506,68 a 34,34 0 1 0 68,0 34,34 0 1 0 -68,0 Z"
++        }
++    ]
++}
+diff -ruN a/data/gmobile.gresources.xml gmobile-0.7.4/data/gmobile.gresources.xml
+--- a/data/gmobile.gresources.xml	2026-11-07 21:08:02.585818970 +1100
++++ b/data/gmobile.gresources.xml	2026-11-07 21:08:02.590832271 +1100
+@@ -19,6 +19,7 @@
+     <file preprocess="json-stripblanks">devices/display-panels/google,gs101-bluejay.json</file>
+     <file preprocess="json-stripblanks">devices/display-panels/google,gs101-oriole.json</file>
+     <file preprocess="json-stripblanks">devices/display-panels/google,gs101-raven.json</file>
++    <file preprocess="json-stripblanks">devices/display-panels/google,gs201-panther.json</file>
+     <file preprocess="json-stripblanks">devices/display-panels/google,zumapro-tegu.json</file>
+     <file preprocess="json-stripblanks">devices/display-panels/oneplus,enchilada.json</file>
+     <file preprocess="json-stripblanks">devices/display-panels/oneplus,fajita.json</file>
