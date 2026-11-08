@@ -1,3 +1,122 @@
+diff --git a/Documentation/devicetree/bindings/power/pd-samsung.yaml b/Documentation/devicetree/bindings/power/pd-samsung.yaml
+index 9c2c51133..4ba555e11 100644
+--- a/Documentation/devicetree/bindings/power/pd-samsung.yaml
++++ b/Documentation/devicetree/bindings/power/pd-samsung.yaml
+@@ -13,12 +13,10 @@ description: |+
+   Exynos processors include support for multiple power domains which are used
+   to gate power to one or more peripherals on the processor.
+ 
+-allOf:
+-  - $ref: power-domain.yaml#
+-
+ properties:
+   compatible:
+     enum:
++      - google,gs101-pd
+       - samsung,exynos4210-pd
+       - samsung,exynos5433-pd
+ 
+@@ -44,11 +42,28 @@ properties:
+   power-domains:
+     maxItems: 1
+ 
++  samsung,dtzpc:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description:
++      Distributed TrustZone Protection Control (DTZPC) node.
++
+ required:
+   - compatible
+   - "#power-domain-cells"
+   - reg
+ 
++allOf:
++  - $ref: power-domain.yaml#
++  - if:
++      not:
++        properties:
++          compatible:
++            contains:
++              const: google,gs101-pd
++    then:
++      properties:
++        samsung,dtzpc: false
++
+ unevaluatedProperties: false
+ 
+ examples:
+@@ -66,3 +81,11 @@ examples:
+         #power-domain-cells = <0>;
+         label = "MFC";
+     };
++
++    power-domain@2080 {
++        compatible = "google,gs101-pd";
++        reg = <0x2080 0x80>;
++        #power-domain-cells = <0>;
++        label = "hsi0";
++        samsung,dtzpc = <&dtzpc_hsi0>;
++    };
+diff --git a/Documentation/devicetree/bindings/soc/google/google,gs101-dtzpc.yaml b/Documentation/devicetree/bindings/soc/google/google,gs101-dtzpc.yaml
+new file mode 100644
+index 000000000..a8c61ce06
+--- /dev/null
++++ b/Documentation/devicetree/bindings/soc/google/google,gs101-dtzpc.yaml
+@@ -0,0 +1,42 @@
++# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/soc/google/google,gs101-dtzpc.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Samsung Exynos Distributed TruztZone Protection Control.
++
++description:
++  Distributed TrustZone Protection Control (D_TZPC) provides an interface to the
++  protection bits that are included in the TrustZone design in a secure system.
++  It configures each area of the memory as secure or non-secure.
++
++maintainers:
++  - André Draszik <andre.draszik@linaro.org>
++
++properties:
++  compatible:
++    const: google,gs101-dtzpc
++
++  clocks:
++    maxItems: 1
++
++  reg:
++    maxItems: 1
++
++required:
++  - compatible
++  - clocks
++  - reg
++
++additionalProperties: false
++
++examples:
++  - |
++    #include <dt-bindings/clock/google,gs101.h>
++
++    dtzpc_hsi0: dtzpc@11010000 {
++      compatible = "google,gs101-dtzpc";
++      reg = <0x11010000 0x10000>;
++      clocks = <&cmu_hsi0 CLK_GOUT_HSI0_D_TZPC_HSI0_PCLK>;
++    };
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 895016ef5..35766d090 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -11159,6 +11159,7 @@ P:	Documentation/process/maintainer-soc-clean-dts.rst
+ C:	irc://irc.oftc.net/pixel6-kernel-dev
+ F:	Documentation/devicetree/bindings/clock/google,gs101-clock.yaml
+ F:	Documentation/devicetree/bindings/phy/google,lga-usb-phy.yaml
++F:	Documentation/devicetree/bindings/soc/google/google,gs101-dtzpc.yaml
+ F:	Documentation/devicetree/bindings/soc/google/google,gs101-pmu-intr-gen.yaml
+ F:	Documentation/devicetree/bindings/usb/google,lga-dwc3.yaml
+ F:	arch/arm64/boot/dts/exynos/google/
 diff --git a/arch/arm64/boot/dts/exynos/google/Makefile b/arch/arm64/boot/dts/exynos/google/Makefile
 index 93c824908..c68dc8c42 100644
 --- a/arch/arm64/boot/dts/exynos/google/Makefile
@@ -965,10 +1084,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..fc9f6f3e2
+index 000000000..8bd53d9ab
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1339 @@
+@@ -0,0 +1,1552 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -1740,7 +1859,145 @@ index 000000000..fc9f6f3e2
 +	pmu_system_controller: system-controller@18060000 {
 +		compatible = "google,gs201-pmu", "google,gs101-pmu";
 +		reg = <0x0 0x18060000 0x10000>;
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
 +		google,pmu-intr-gen-syscon = <&pmu_intr_gen>;
++
++		/*
++		 * Only blocks without kernel drivers are described, so that
++		 * genpd powers them off. The bootloader leaves all of them on.
++		 * HSI0/HSI2 (USB/UFS/PCIe), DISP/DPU (live splash), G3D and
++		 * AoC are intentionally not listed yet.
++		 */
++		pd_eh: power-domain@1c00 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x1c00 0x80>;
++			#power-domain-cells = <0>;
++			label = "eh";
++			samsung,dtzpc = <&dtzpc_eh>;
++		};
++
++		pd_g2d: power-domain@2300 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2300 0x80>;
++			#power-domain-cells = <0>;
++			label = "g2d";
++			samsung,dtzpc = <&dtzpc_g2d>;
++		};
++
++		pd_mfc: power-domain@2380 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2380 0x80>;
++			#power-domain-cells = <0>;
++			label = "mfc";
++			samsung,dtzpc = <&dtzpc_mfc>;
++		};
++
++		pd_csis: power-domain@2400 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2400 0x80>;
++			#power-domain-cells = <0>;
++			label = "csis";
++			samsung,dtzpc = <&dtzpc_csis>;
++		};
++
++		pd_pdp: power-domain@2480 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2480 0x80>;
++			#power-domain-cells = <0>;
++			label = "pdp";
++			samsung,dtzpc = <&dtzpc_pdp>;
++		};
++
++		pd_dns: power-domain@2500 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2500 0x80>;
++			#power-domain-cells = <0>;
++			label = "dns";
++			power-domains = <&pd_itp>;
++			samsung,dtzpc = <&dtzpc_dns>;
++		};
++
++		pd_g3aa: power-domain@2580 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2580 0x80>;
++			#power-domain-cells = <0>;
++			label = "g3aa";
++			samsung,dtzpc = <&dtzpc_g3aa>;
++		};
++
++		pd_ipp: power-domain@2600 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2600 0x80>;
++			#power-domain-cells = <0>;
++			label = "ipp";
++			power-domains = <&pd_pdp>;
++			samsung,dtzpc = <&dtzpc_ipp>;
++		};
++
++		pd_itp: power-domain@2680 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2680 0x80>;
++			#power-domain-cells = <0>;
++			label = "itp";
++			samsung,dtzpc = <&dtzpc_itp>;
++		};
++
++		pd_mcsc: power-domain@2700 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2700 0x80>;
++			#power-domain-cells = <0>;
++			label = "mcsc";
++			samsung,dtzpc = <&dtzpc_mcsc>;
++		};
++
++		pd_gdc: power-domain@2780 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2780 0x80>;
++			#power-domain-cells = <0>;
++			label = "gdc";
++			samsung,dtzpc = <&dtzpc_gdc>;
++		};
++
++		pd_tnr: power-domain@2800 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2800 0x80>;
++			#power-domain-cells = <0>;
++			label = "tnr";
++			samsung,dtzpc = <&dtzpc_tnr>;
++		};
++
++		pd_bo: power-domain@2880 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2880 0x80>;
++			#power-domain-cells = <0>;
++			label = "bo";
++			samsung,dtzpc = <&dtzpc_bo>;
++		};
++
++		pd_tpu: power-domain@2900 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2900 0x80>;
++			#power-domain-cells = <0>;
++			label = "tpu";
++			samsung,dtzpc = <&dtzpc_tpu>;
++		};
++
++		pd_aur: power-domain@2980 {
++			compatible = "google,gs201-pd", "google,gs101-pd";
++			reg = <0x2980 0x80>;
++			#power-domain-cells = <0>;
++			label = "aur";
++			samsung,dtzpc = <&dtzpc_aur>;
++		};
++
++		poweroff: syscon-poweroff {
++			compatible = "syscon-poweroff";
++			offset = <0x3e9c>; /* PAD_CTRL_PWR_HOLD */
++			mask = <0x00000100>;
++			value = <0x0>;
++		};
 +
 +		/* Same reboot reason register and magics as gs101/downstream */
 +		reboot-mode {
@@ -1832,6 +2089,81 @@ index 000000000..fc9f6f3e2
 +		#address-cells = <1>;
 +		#size-cells = <1>;
 +		ranges = <0x0 0x0 0x0 0x40000000>;
++
++		dtzpc_eh: dtzpc@17010000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x17010000 0x10000>;
++		};
++
++		dtzpc_csis: dtzpc@1a410000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1a410000 0x10000>;
++		};
++
++		dtzpc_g3aa: dtzpc@1a810000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1a810000 0x10000>;
++		};
++
++		dtzpc_pdp: dtzpc@1aa10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1aa10000 0x10000>;
++		};
++
++		dtzpc_ipp: dtzpc@1ac10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1ac10000 0x10000>;
++		};
++
++		dtzpc_dns: dtzpc@1b010000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1b010000 0x10000>;
++		};
++
++		dtzpc_itp: dtzpc@1b410000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1b410000 0x10000>;
++		};
++
++		dtzpc_mcsc: dtzpc@1b710000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1b710000 0x10000>;
++		};
++
++		dtzpc_tnr: dtzpc@1bc10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1bc10000 0x10000>;
++		};
++
++		dtzpc_g2d: dtzpc@1c610000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1c610000 0x10000>;
++		};
++
++		dtzpc_mfc: dtzpc@1c810000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1c810000 0x10000>;
++		};
++
++		dtzpc_bo: dtzpc@1ca10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1ca10000 0x10000>;
++		};
++
++		dtzpc_tpu: dtzpc@1cc10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1cc10000 0x10000>;
++		};
++
++		dtzpc_gdc: dtzpc@1d010000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x1d010000 0x10000>;
++		};
++
++		dtzpc_aur: dtzpc@25a10000 {
++			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
++			reg = <0x25a10000 0x10000>;
++		};
 +
 +		pinctrl_peric0: pinctrl@10840000 {
 +			compatible = "google,gs201-pinctrl";
@@ -8513,6 +8845,356 @@ index bb02fb49b..30dc4a614 100644
  extern const struct samsung_pinctrl_of_match_data s3c64xx_of_data;
  extern const struct samsung_pinctrl_of_match_data s5pv210_of_data;
  
+diff --git a/drivers/pmdomain/samsung/exynos-pm-domains.c b/drivers/pmdomain/samsung/exynos-pm-domains.c
+index 5c3aa8983..ed7a58075 100644
+--- a/drivers/pmdomain/samsung/exynos-pm-domains.c
++++ b/drivers/pmdomain/samsung/exynos-pm-domains.c
+@@ -9,68 +9,164 @@
+ // conjunction with runtime-pm. Support for both device-tree and non-device-tree
+ // based power domain support is included.
+ 
+-#include <linux/io.h>
++#include <linux/arm-smccc.h>
+ #include <linux/err.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
++#include <linux/mfd/syscon.h>
+ #include <linux/pm_domain.h>
+ #include <linux/delay.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+ #include <linux/pm_runtime.h>
++#include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
++
++#define EXYNOS_SMC_CMD_PREPARE_PD_ONOFF		0x82000410
++#define EXYNOS_GET_IN_PD_DOWN			0
++#define EXYNOS_WAKEUP_PD_DOWN			1
++#define EXYNOS_RUNTIME_PM_TZPC_GROUP		2
++
++#define to_exynos_pd(gpd) container_of_const(gpd, struct exynos_pm_domain, pd)
+ 
+ struct exynos_pm_domain_config {
+ 	/* Value for LOCAL_PWR_CFG and STATUS fields for each domain */
+ 	u32 local_pwr_cfg;
++	u32 smc_offset;
++	bool use_parent_regmap;
+ };
+ 
+ /*
+  * Exynos specific wrapper around the generic power domain
+  */
+ struct exynos_pm_domain {
+-	void __iomem *base;
++	struct regmap *regmap;
++	struct device *dev;
++	struct regulator *supply;
+ 	struct generic_pm_domain pd;
+-	u32 local_pwr_cfg;
++	const struct exynos_pm_domain_config *cfg;
++	u32 configuration_reg;
++	u32 status_reg;
++	phys_addr_t ac_pa;
+ };
+ 
++static int exynos_pd_access_controller_power(struct exynos_pm_domain *pd,
++					     bool power_on)
++{
++	struct arm_smccc_res res;
++
++	if (!pd->ac_pa || !pd->cfg->smc_offset)
++		return 0;
++
++	arm_smccc_smc(EXYNOS_SMC_CMD_PREPARE_PD_ONOFF,
++		      power_on ? EXYNOS_WAKEUP_PD_DOWN : EXYNOS_GET_IN_PD_DOWN,
++		      pd->ac_pa + pd->cfg->smc_offset,
++		      EXYNOS_RUNTIME_PM_TZPC_GROUP, 0, 0, 0, 0, &res);
++
++	return res.a0;
++}
++
+ static int exynos_pd_power(struct generic_pm_domain *domain, bool power_on)
+ {
+-	struct exynos_pm_domain *pd;
+-	void __iomem *base;
++	struct exynos_pm_domain *pd = to_exynos_pd(domain);
+ 	u32 timeout, pwr;
+-	char *op;
++	int err;
+ 
+-	pd = container_of(domain, struct exynos_pm_domain, pd);
+-	base = pd->base;
++	if (!power_on) {
++		err = exynos_pd_access_controller_power(pd, power_on);
++		if (err) {
++			dev_err(pd->dev,
++				"SMC for power domain %s %sable failed: %d\n",
++				domain->name, power_on ? "en" : "dis", err);
++			return err;
++		}
++	}
+ 
+-	pwr = power_on ? pd->local_pwr_cfg : 0;
+-	writel_relaxed(pwr, base);
++	pwr = power_on ? pd->cfg->local_pwr_cfg : 0;
++	err = regmap_write(pd->regmap, pd->configuration_reg, pwr);
++	if (err) {
++		dev_err(pd->dev,
++			"Regmap write for power domain %s %sable failed: %d\n",
++			domain->name, power_on ? "en" : "dis", err);
++		return err;
++	}
+ 
+ 	/* Wait max 1ms */
+ 	timeout = 10;
++	while (timeout-- > 0) {
++		unsigned int val;
+ 
+-	while ((readl_relaxed(base + 0x4) & pd->local_pwr_cfg) != pwr) {
+-		if (!timeout) {
+-			op = (power_on) ? "enable" : "disable";
+-			pr_err("Power domain %s %s failed\n", domain->name, op);
+-			return -ETIMEDOUT;
++		err = regmap_read(pd->regmap, pd->status_reg, &val);
++		if (err || ((val & pd->cfg->local_pwr_cfg) != pwr)) {
++			cpu_relax();
++			usleep_range(80, 100);
++			continue;
+ 		}
+-		timeout--;
+-		cpu_relax();
+-		usleep_range(80, 100);
++
++		break;
+ 	}
+ 
+-	return 0;
++	if (!timeout && !err)
++		/* Only return timeout if no other error also occurred. */
++		err = -ETIMEDOUT;
++	if (err) {
++		dev_err(pd->dev, "Power domain %s %sable failed: %d\n",
++			domain->name, power_on ? "en" : "dis", err);
++		return err;
++	}
++
++	if (power_on) {
++		err = exynos_pd_access_controller_power(pd, power_on);
++		if (err) {
++			dev_err(pd->dev,
++				"SMC for power domain %s %sable failed: %d\n",
++				domain->name, power_on ? "en" : "dis", err);
++			return err;
++		}
++	}
++
++	return err;
++}
++
++static int exynos_pd_regulator_enable(struct regulator *supply)
++{
++	return supply ? regulator_enable(supply) : 0;
++}
++
++static int exynos_pd_regulator_disable(struct regulator *supply)
++{
++	return supply ? regulator_disable(supply) : 0;
+ }
+ 
+ static int exynos_pd_power_on(struct generic_pm_domain *domain)
+ {
+-	return exynos_pd_power(domain, true);
++	struct exynos_pm_domain *pd = to_exynos_pd(domain);
++	int ret;
++
++	ret = exynos_pd_regulator_enable(pd->supply);
++	if (ret)
++		return ret;
++
++	ret = exynos_pd_power(domain, true);
++	if (ret)
++		exynos_pd_regulator_disable(pd->supply);
++
++	return ret;
+ }
+ 
+ static int exynos_pd_power_off(struct generic_pm_domain *domain)
+ {
+-	return exynos_pd_power(domain, false);
++	struct exynos_pm_domain *pd = to_exynos_pd(domain);
++	int ret;
++
++	ret = exynos_pd_power(domain, false);
++	if (ret)
++		return ret;
++
++	/* Ignore regulator errors - the domain was disabled after all. */
++	exynos_pd_regulator_disable(pd->supply);
++
++	return 0;
+ }
+ 
+ static const struct exynos_pm_domain_config exynos4210_cfg = {
+@@ -81,8 +177,17 @@ static const struct exynos_pm_domain_config exynos5433_cfg = {
+ 	.local_pwr_cfg		= 0xf,
+ };
+ 
++static const struct exynos_pm_domain_config gs101_cfg = {
++	.local_pwr_cfg		= BIT(0),
++	.smc_offset		= 0x0204,
++	.use_parent_regmap	= true,
++};
++
+ static const struct of_device_id exynos_pm_domain_of_match[] = {
+ 	{
++		.compatible = "google,gs101-pd",
++		.data = &gs101_cfg,
++	}, {
+ 		.compatible = "samsung,exynos4210-pd",
+ 		.data = &exynos4210_cfg,
+ 	}, {
+@@ -102,6 +207,38 @@ static const char *exynos_get_domain_name(struct device *dev,
+ 	return devm_kstrdup_const(dev, name, GFP_KERNEL);
+ }
+ 
++static int exynos_pd_get_access_controller(struct exynos_pm_domain *pd)
++{
++	struct device_node *ac_np;
++	struct resource ac_res;
++	int ret;
++
++	ac_np = of_parse_phandle(pd->dev->of_node, "samsung,dtzpc", 0);
++	if (!ac_np)
++		return 0;
++
++	ret = of_address_to_resource(ac_np, 0, &ac_res);
++	of_node_put(ac_np);
++	if (ret)
++		return dev_err_probe(pd->dev, ret,
++				     "failed to get access controller\n");
++
++	pd->ac_pa = ac_res.start;
++
++	/*
++	 * For some domains, TZ save/restore might not be implemented. If that
++	 * is the case, simply mark it as always on, as otherwise a power cycle
++	 * will lead to lost TZ configuration, making it impossible to access
++	 * registers from Linux afterwards.
++	 */
++	if (exynos_pd_access_controller_power(pd, false) == -ENOENT) {
++		pd->ac_pa = 0;
++		pd->pd.flags |= GENPD_FLAG_ALWAYS_ON;
++	}
++
++	return 0;
++}
++
+ static int exynos_pd_probe(struct platform_device *pdev)
+ {
+ 	const struct exynos_pm_domain_config *pm_domain_cfg;
+@@ -109,6 +246,8 @@ static int exynos_pd_probe(struct platform_device *pdev)
+ 	struct device_node *np = dev->of_node;
+ 	struct of_phandle_args child, parent;
+ 	struct exynos_pm_domain *pd;
++	struct resource *res;
++	unsigned int val;
+ 	int on, ret;
+ 
+ 	pm_domain_cfg = of_device_get_match_data(dev);
+@@ -116,17 +255,76 @@ static int exynos_pd_probe(struct platform_device *pdev)
+ 	if (!pd)
+ 		return -ENOMEM;
+ 
++	pd->dev = dev;
++
+ 	pd->pd.name = exynos_get_domain_name(dev, np);
+ 	if (!pd->pd.name)
+ 		return -ENOMEM;
+ 
+-	pd->base = of_iomap(np, 0);
+-	if (!pd->base)
+-		return -ENODEV;
++	/*
++	 * The resource typically points into the address space of the PMU and
++	 * we have to consider two cases:
++	 *   1) some implementations require a custom regmap (from PMU parent)
++	 *   2) this driver might map the same addresses as the PMU driver
++	 * Therefore, avoid using devm_platform_get_and_ioremap_resource() and
++	 * instead use platform_get_resource() here, and below for case 1) use
++	 * syscon_node_to_regmap() while for case 2) use devm_ioremap() to avoid
++	 * conflicts due to address space overlap.
++	 */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
++		return dev_err_probe(dev, -ENXIO, "missing IO resources");
++
++	if (pm_domain_cfg->use_parent_regmap) {
++		pd->regmap = syscon_node_to_regmap(dev->parent->of_node);
++		if (IS_ERR(pd->regmap))
++			return dev_err_probe(dev, PTR_ERR(pd->regmap),
++					     "failed to acquire PMU regmap");
++
++		pd->configuration_reg = res->start;
++		pd->status_reg = res->start;
++	} else {
++		void __iomem *base;
++
++		const struct regmap_config reg_config = {
++			.reg_bits = 32,
++			.val_bits = 32,
++			.reg_stride = 4,
++			.use_relaxed_mmio = true,
++			.max_register = (resource_size(res)
++					 - reg_config.reg_stride),
++		};
++
++		base = devm_ioremap(dev, res->start, resource_size(res));
++		if (!base)
++			return dev_err_probe(dev, -ENOMEM,
++					     "failed to ioremap PMU registers");
++
++		pd->regmap = devm_regmap_init_mmio(dev, base, &reg_config);
++		if (IS_ERR(pd->regmap))
++			return dev_err_probe(dev, PTR_ERR(base),
++					     "failed to init regmap");
++	}
+ 
+ 	pd->pd.power_off = exynos_pd_power_off;
+ 	pd->pd.power_on = exynos_pd_power_on;
+-	pd->local_pwr_cfg = pm_domain_cfg->local_pwr_cfg;
++	pd->cfg = pm_domain_cfg;
++	pd->configuration_reg += 0;
++	pd->status_reg += 4;
++
++	ret = exynos_pd_get_access_controller(pd);
++	if (ret)
++		return ret;
++
++	/* get the domain power supply if required */
++	pd->supply = devm_regulator_get_optional(dev, "domain");
++	if (IS_ERR(pd->supply)) {
++		if (PTR_ERR(pd->supply) != -ENODEV)
++			return dev_err_probe(dev, PTR_ERR(pd->supply),
++					     "failed to get domain supply");
++
++		pd->supply = NULL;
++	}
+ 
+ 	/*
+ 	 * Some Samsung platforms with bootloaders turning on the splash-screen
+@@ -137,7 +335,11 @@ static int exynos_pd_probe(struct platform_device *pdev)
+ 	    of_device_is_compatible(np, "samsung,exynos4210-pd"))
+ 		exynos_pd_power_off(&pd->pd);
+ 
+-	on = readl_relaxed(pd->base + 0x4) & pd->local_pwr_cfg;
++	ret = regmap_read(pd->regmap, pd->status_reg, &val);
++	if (ret)
++		return dev_err_probe(dev, ret, "failed to read status");
++
++	on = val & pd->cfg->local_pwr_cfg;
+ 
+ 	pm_genpd_init(&pd->pd, NULL, !on);
+ 	ret = of_genpd_add_provider_simple(np, &pd->pd);
 diff --git a/drivers/power/supply/max77759_charger.c b/drivers/power/supply/max77759_charger.c
 index f308db3f7..059f63ab2 100644
 --- a/drivers/power/supply/max77759_charger.c
@@ -8754,10 +9436,35 @@ index 000000000..f195a6e83
 +MODULE_DESCRIPTION("Samsung S2MPG12 regulator driver");
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/rtc/rtc-s5m.c b/drivers/rtc/rtc-s5m.c
-index aa706074e..5bd889ea5 100644
+index aa706074e..9cfa4b546 100644
 --- a/drivers/rtc/rtc-s5m.c
 +++ b/drivers/rtc/rtc-s5m.c
-@@ -809,6 +809,8 @@ static SIMPLE_DEV_PM_OPS(s5m_rtc_pm_ops, s5m_rtc_suspend, s5m_rtc_resume);
+@@ -661,6 +661,24 @@ static int s5m_rtc_restart_s2mpg10(struct sys_off_data *data)
+ 	return ret ? NOTIFY_BAD : NOTIFY_DONE;
+ }
+ 
++static void s5m_rtc_shutdown(struct platform_device *pdev)
++{
++	struct s5m_rtc_info *info = platform_get_drvdata(pdev);
++
++	if (!info || info->device_type != S2MPG10 ||
++	    system_state != SYSTEM_POWER_OFF)
++		return;
++
++	/*
++	 * WTSR (and SMPL) make the PMIC power the system back on once the SoC
++	 * drops PS_HOLD, turning a power-off into a reboot. Disable them, as
++	 * the downstream driver does.
++	 */
++	regmap_clear_bits(info->regmap, S2MPG10_RTC_SMPL, S2MPG10_SMPL_EN);
++	regmap_clear_bits(info->regmap, S2MPG10_RTC_WTSR,
++			  S2MPG10_WTSR_COLDRST | S2MPG10_WTSR_WTSR_EN);
++}
++
+ static int s5m_rtc_probe(struct platform_device *pdev)
+ {
+ 	struct sec_pmic_dev *s5m87xx = dev_get_drvdata(pdev->dev.parent);
+@@ -809,6 +827,8 @@ static SIMPLE_DEV_PM_OPS(s5m_rtc_pm_ops, s5m_rtc_suspend, s5m_rtc_resume);
  static const struct platform_device_id s5m_rtc_id[] = {
  	{ .name = "s5m-rtc",     .driver_data = S5M8767X },
  	{ .name = "s2mpg10-rtc", .driver_data = S2MPG10 },
@@ -8766,6 +9473,14 @@ index aa706074e..5bd889ea5 100644
  	{ .name = "s2mps13-rtc", .driver_data = S2MPS13X },
  	{ .name = "s2mps14-rtc", .driver_data = S2MPS14X },
  	{ .name = "s2mps15-rtc", .driver_data = S2MPS15X },
+@@ -822,6 +842,7 @@ static struct platform_driver s5m_rtc_driver = {
+ 		.pm	= &s5m_rtc_pm_ops,
+ 	},
+ 	.probe		= s5m_rtc_probe,
++	.shutdown	= s5m_rtc_shutdown,
+ 	.id_table	= s5m_rtc_id,
+ };
+ 
 diff --git a/drivers/soc/samsung/Makefile b/drivers/soc/samsung/Makefile
 index 636a76260..b9dbbdf30 100644
 --- a/drivers/soc/samsung/Makefile
@@ -9406,6 +10121,17 @@ index 6191f409d..053e453cc 100644
  };
  
  /**
+diff --git a/include/linux/mfd/samsung/rtc.h b/include/linux/mfd/samsung/rtc.h
+index 51c4239a1..5dbbbd1f6 100644
+--- a/include/linux/mfd/samsung/rtc.h
++++ b/include/linux/mfd/samsung/rtc.h
+@@ -167,4 +167,6 @@ enum s2mpg10_rtc_reg {
+ #define S2MPG10_WTSR_WTSRT	GENMASK(3, 1)
+ #define S2MPG10_WTSR_WTSR_EN	BIT(0)
+ 
++#define S2MPG10_SMPL_EN		BIT(0)
++
+ #endif /*  __LINUX_MFD_SEC_RTC_H */
 diff --git a/include/linux/mfd/samsung/s2mpg12.h b/include/linux/mfd/samsung/s2mpg12.h
 new file mode 100644
 index 000000000..2cc25c3bc
