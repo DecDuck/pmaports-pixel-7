@@ -130,10 +130,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..e56816453
+index 000000000..73e3b8203
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,496 @@
+@@ -0,0 +1,513 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -194,13 +194,13 @@ index 000000000..e56816453
 +	};
 +
 +	/*
-+	 * Physical size of the S6E3FC3 panel (6.3", 1080x2400 @ ~416ppi) for
-+	 * simpledrm, so compositors pick a sensible scale. No panel driver yet.
++	 * Physical size of the S6E3FC3 panel (6.3", 1080x2400 @ ~416ppi), so
++	 * compositors pick a sensible scale. No panel driver yet.
 +	 */
 +	panel: panel {
 +		width-mm = <66>;
 +		height-mm = <147>;
-+		/* not a device: keeps fw_devlink from deferring simpledrm on it */
++		/* not a device: only describes the panel to the display driver */
 +		status = "disabled";
 +	};
 +
@@ -219,6 +219,8 @@ index 000000000..e56816453
 +			height = <2400>;
 +			stride = <(1080 * 4)>;
 +			format = "a8r8g8b8";
++			/* The DECON driver takes over the splash pipeline. */
++			status = "disabled";
 +		};
 +	};
 +};
@@ -228,6 +230,21 @@ index 000000000..e56816453
 +		reg = <0x0 0xfac00000 (1080 * 2400 * 4)>;
 +		no-map;
 +	};
++
++	/* Scanout buffers: 10 MiB each at 1080x2400 */
++	linux,cma {
++		compatible = "shared-dma-pool";
++		reusable;
++		size = <0x10000000>;
++		alignment = <0x0 0x400000>;
++		alloc-ranges = <0x0 0x80000000 0x80000000>;
++		linux,cma-default;
++	};
++};
++
++&decon0 {
++	panel = <&panel>;
++	status = "okay";
 +};
 +
 +&ufs_0 {
@@ -1084,10 +1101,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..8bd53d9ab
+index 000000000..d0a99a3c6
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1552 @@
+@@ -0,0 +1,1564 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -1868,7 +1885,9 @@ index 000000000..8bd53d9ab
 +		 * Only blocks without kernel drivers are described, so that
 +		 * genpd powers them off. The bootloader leaves all of them on.
 +		 * HSI0/HSI2 (USB/UFS/PCIe), DISP/DPU (live splash), G3D and
-+		 * AoC are intentionally not listed yet.
++		 * AoC are intentionally not listed yet. Parent links (DNS->ITP,
++		 * IPP->PDP) are omitted as well: genpd powers a parent back on
++		 * during system resume, which resets the SoC.
 +		 */
 +		pd_eh: power-domain@1c00 {
 +			compatible = "google,gs201-pd", "google,gs101-pd";
@@ -1915,7 +1934,6 @@ index 000000000..8bd53d9ab
 +			reg = <0x2500 0x80>;
 +			#power-domain-cells = <0>;
 +			label = "dns";
-+			power-domains = <&pd_itp>;
 +			samsung,dtzpc = <&dtzpc_dns>;
 +		};
 +
@@ -1932,7 +1950,6 @@ index 000000000..8bd53d9ab
 +			reg = <0x2600 0x80>;
 +			#power-domain-cells = <0>;
 +			label = "ipp";
-+			power-domains = <&pd_pdp>;
 +			samsung,dtzpc = <&dtzpc_ipp>;
 +		};
 +
@@ -2163,6 +2180,18 @@ index 000000000..8bd53d9ab
 +		dtzpc_aur: dtzpc@25a10000 {
 +			compatible = "google,gs201-dtzpc", "google,gs101-dtzpc";
 +			reg = <0x25a10000 0x10000>;
++		};
++
++		decon0: display-controller@1c240000 {
++			compatible = "google,gs201-decon";
++			reg = <0x1c240000 0x1000>,
++			      <0x1c250000 0x6000>,
++			      <0x1c270000 0x6000>,
++			      <0x1c0b0000 0x6000>;
++			reg-names = "main", "win", "wincon", "dma";
++			interrupts = <GIC_SPI 241 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "frame_start";
++			status = "disabled";
 +		};
 +
 +		pinctrl_peric0: pinctrl@10840000 {
@@ -3283,6 +3312,725 @@ index 942a2e9f0..f7566f458 100644
  	{},
  };
  MODULE_DEVICE_TABLE(of, acpm_match);
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index 323422861..ce3aa90c8 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -309,6 +309,7 @@ source "drivers/gpu/drm/atmel-hlcdc/Kconfig"
+ source "drivers/gpu/drm/bridge/Kconfig"
+ source "drivers/gpu/drm/etnaviv/Kconfig"
+ source "drivers/gpu/drm/exynos/Kconfig"
++source "drivers/gpu/drm/google/Kconfig"
+ source "drivers/gpu/drm/fsl-dcu/Kconfig"
+ source "drivers/gpu/drm/gma500/Kconfig"
+ source "drivers/gpu/drm/gud/Kconfig"
+diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
+index e635fcffd..a1185c070 100644
+--- a/drivers/gpu/drm/Makefile
++++ b/drivers/gpu/drm/Makefile
+@@ -188,6 +188,7 @@ obj-$(CONFIG_DRM_VKMS)	+= vkms/
+ obj-$(CONFIG_DRM_NOUVEAU) +=nouveau/
+ # nova-drm is built from drivers/gpu/Makefile together with nova-core.
+ obj-$(CONFIG_DRM_EXYNOS) +=exynos/
++obj-$(CONFIG_DRM_GS201_DPU) += google/
+ obj-$(CONFIG_DRM_ROCKCHIP) +=rockchip/
+ obj-$(CONFIG_DRM_GMA500) += gma500/
+ obj-$(CONFIG_DRM_UDL) += udl/
+diff --git a/drivers/gpu/drm/google/Kconfig b/drivers/gpu/drm/google/Kconfig
+new file mode 100644
+index 000000000..863f31049
+--- /dev/null
++++ b/drivers/gpu/drm/google/Kconfig
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: GPL-2.0-only
++config DRM_GS201_DPU
++	tristate "Google gs201 (Tensor G2) display controller"
++	depends on DRM && OF
++	depends on ARCH_EXYNOS || COMPILE_TEST
++	select DRM_CLIENT_SELECTION
++	select DRM_GEM_DMA_HELPER
++	select DRM_KMS_HELPER
++	select APERTURE_HELPERS
++	help
++	  Display controller (DECON with DPP DMA) of the Google gs201 SoC.
++	  It takes over the command-mode DSI pipeline set up by the
++	  bootloader and scans out DRM framebuffers on it.
+diff --git a/drivers/gpu/drm/google/Makefile b/drivers/gpu/drm/google/Makefile
+new file mode 100644
+index 000000000..b66ba2bcd
+--- /dev/null
++++ b/drivers/gpu/drm/google/Makefile
+@@ -0,0 +1 @@
++obj-$(CONFIG_DRM_GS201_DPU) += gs201-dpu.o
+diff --git a/drivers/gpu/drm/google/gs201-dpu.c b/drivers/gpu/drm/google/gs201-dpu.c
+new file mode 100644
+index 000000000..c2f1ae440
+--- /dev/null
++++ b/drivers/gpu/drm/google/gs201-dpu.c
+@@ -0,0 +1,663 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Google Tensor G2 (gs201) display controller (DECON + DPP DMA).
++ *
++ * The bootloader brings up DECON0 -> DSIM0 -> panel in command mode, with
++ * the panel's TE line triggering a frame transfer, and scans out its splash
++ * buffer through one DPP DMA channel on one DECON window. This driver adopts
++ * that pipeline as-is and only reprograms the scanout buffer, so DSIM and the
++ * panel are not touched.
++ *
++ * Command-mode panels keep the last frame in their own RAM, so the TE trigger
++ * is only unmasked while DRM vblank is enabled: frames are sent while
++ * something is being updated and the link stays idle otherwise.
++ */
++
++#include <linux/aperture.h>
++#include <linux/dma-mapping.h>
++#include <linux/interrupt.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++
++#include <drm/clients/drm_client_setup.h>
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_crtc.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_encoder.h>
++#include <drm/drm_fb_dma_helper.h>
++#include <drm/drm_fbdev_dma.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_gem_dma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_modeset_helper_vtables.h>
++#include <drm/drm_print.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_vblank.h>
++
++/* DECON main */
++#define DECON_FRAME_COUNT		0x0004
++#define DECON_GLOBAL_CON		0x0020
++#define  GLOBAL_CON_OPERATION_MODE_CMD	BIT(8)
++#define  GLOBAL_CON_DECON_EN		BIT(1)
++#define DECON_TRIG_CON			0x0030
++#define  TRIG_CON_HW_TRIG_MASK_DECON	BIT(4)
++#define  TRIG_CON_HW_TRIG_EN		BIT(0)
++#define DECON_SHD_REG_UP_REQ		0x0050
++#define  SHD_REG_UP_REQ_GLOBAL		BIT(31)
++#define  SHD_REG_UP_REQ_WIN(w)		BIT(w)
++#define DECON_INT_EN			0x0060
++#define  INT_EN_FRAME_START		BIT(12)
++#define  INT_EN				BIT(0)
++#define DECON_INT_PEND			0x0070
++#define  INT_PEND_FRAME_START		BIT(12)
++#define DECON_BLD_BG_IMG_SIZE_PRI	0x0220
++
++/* DECON window, one 0x1000 block per window */
++#define WIN_COLORMAP_0(w)		((w) * 0x1000 + 0x14)
++#define WIN_COLORMAP_1(w)		((w) * 0x1000 + 0x18)
++
++/* DECON window control, one 0x1000 block per window */
++#define DECON_CON_WIN(w)		((w) * 0x1000)
++#define  WIN_CHMAP_GET(v)		(((v) >> 4) & 0x7)
++#define  WIN_MAPCOLOR_EN		BIT(1)
++#define  WIN_EN				BIT(0)
++#define DECON_MAX_WIN			6
++
++/* DPP DMA (RDMA), one 0x1000 block per channel */
++#define RDMA_IN_CTRL_0			0x0008
++#define  IDMA_IMG_FORMAT_MASK		GENMASK(13, 8)
++#define  IDMA_IMG_FORMAT(v)		((v) << 8)
++#define RDMA_SRC_SIZE			0x0010
++#define RDMA_SRC_OFFSET			0x0014
++#define RDMA_IMG_SIZE			0x0018
++#define RDMA_BASEADDR_Y8		0x0040
++#define RDMA_SRC_STRIDE_1		0x0054
++#define DPP_MAX_CH			6
++
++/* Format codes describe the byte order in memory. */
++static const struct {
++	u32 fourcc;
++	u32 hw;
++} gs201_dpu_formats[] = {
++	{ DRM_FORMAT_XRGB8888, 4 },
++	{ DRM_FORMAT_XBGR8888, 5 },
++};
++
++struct gs201_dpu {
++	struct drm_device drm;
++	struct drm_plane plane;
++	struct drm_crtc crtc;
++	struct drm_encoder encoder;
++	struct drm_connector connector;
++
++	void __iomem *decon;
++	void __iomem *win;
++	void __iomem *wincon;
++	void __iomem *dma;
++	unsigned int win_id;
++	unsigned int width, height;
++	u32 width_mm, height_mm;
++
++	/* event and update_pending are protected by drm.event_lock */
++	struct drm_pending_vblank_event *event;
++	bool update_pending;
++};
++
++#define to_dpu(x) container_of(x, struct gs201_dpu, drm)
++
++static void decon_write_mask(struct gs201_dpu *dpu, u32 reg, u32 val, u32 mask)
++{
++	u32 old = readl(dpu->decon + reg);
++
++	writel((old & ~mask) | (val & mask), dpu->decon + reg);
++}
++
++static void gs201_dpu_set_trigger(struct gs201_dpu *dpu, bool run)
++{
++	decon_write_mask(dpu, DECON_TRIG_CON,
++			 run ? TRIG_CON_HW_TRIG_EN : TRIG_CON_HW_TRIG_MASK_DECON,
++			 TRIG_CON_HW_TRIG_EN | TRIG_CON_HW_TRIG_MASK_DECON);
++}
++
++static void gs201_dpu_request_update(struct gs201_dpu *dpu)
++{
++	writel(SHD_REG_UP_REQ_GLOBAL | SHD_REG_UP_REQ_WIN(dpu->win_id),
++	       dpu->decon + DECON_SHD_REG_UP_REQ);
++}
++
++/*
++ * DECON sends no frames at all without an enabled window, so "off" keeps the
++ * window enabled and fills it with a solid black colour instead.
++ */
++static void gs201_dpu_set_window(struct gs201_dpu *dpu, bool enable)
++{
++	void __iomem *reg = dpu->wincon + DECON_CON_WIN(dpu->win_id);
++	u32 val = readl(reg) | WIN_EN;
++
++	if (enable) {
++		val &= ~WIN_MAPCOLOR_EN;
++	} else {
++		writel(0, dpu->win + WIN_COLORMAP_0(dpu->win_id));
++		writel(0, dpu->win + WIN_COLORMAP_1(dpu->win_id));
++		val |= WIN_MAPCOLOR_EN;
++	}
++	writel(val, reg);
++}
++
++static irqreturn_t gs201_dpu_irq(int irq, void *data)
++{
++	struct gs201_dpu *dpu = data;
++	u32 pend = readl(dpu->decon + DECON_INT_PEND);
++
++	writel(pend, dpu->decon + DECON_INT_PEND);
++	if (!(pend & INT_PEND_FRAME_START))
++		return pend ? IRQ_HANDLED : IRQ_NONE;
++
++	drm_crtc_handle_vblank(&dpu->crtc);
++
++	spin_lock(&dpu->drm.event_lock);
++	/* The update has been latched once the request bits are cleared. */
++	if (dpu->update_pending &&
++	    !readl(dpu->decon + DECON_SHD_REG_UP_REQ)) {
++		dpu->update_pending = false;
++		if (dpu->event) {
++			drm_crtc_send_vblank_event(&dpu->crtc, dpu->event);
++			dpu->event = NULL;
++		}
++		drm_crtc_vblank_put(&dpu->crtc);
++	}
++	spin_unlock(&dpu->drm.event_lock);
++
++	return IRQ_HANDLED;
++}
++
++static int gs201_dpu_plane_atomic_check(struct drm_plane *plane,
++					struct drm_atomic_commit *state)
++{
++	struct drm_plane_state *new = drm_atomic_get_new_plane_state(state, plane);
++	struct gs201_dpu *dpu = to_dpu(plane->dev);
++	struct drm_crtc_state *crtc_state;
++	int ret;
++
++	if (!new->crtc)
++		return 0;
++
++	crtc_state = drm_atomic_get_crtc_state(state, new->crtc);
++	if (IS_ERR(crtc_state))
++		return PTR_ERR(crtc_state);
++
++	ret = drm_atomic_helper_check_plane_state(new, crtc_state,
++						  DRM_PLANE_NO_SCALING,
++						  DRM_PLANE_NO_SCALING,
++						  false, true);
++	if (ret || !new->visible)
++		return ret;
++
++	if (new->crtc_w != dpu->width || new->crtc_h != dpu->height)
++		return -EINVAL;
++
++	return 0;
++}
++
++static void gs201_dpu_plane_atomic_update(struct drm_plane *plane,
++					  struct drm_atomic_commit *state)
++{
++	struct drm_plane_state *new = drm_atomic_get_new_plane_state(state, plane);
++	struct gs201_dpu *dpu = to_dpu(plane->dev);
++	struct drm_framebuffer *fb = new->fb;
++	struct drm_gem_dma_object *obj;
++	unsigned int cpp, i;
++	u32 fmt = 0, val;
++
++	if (!new->visible || !fb) {
++		gs201_dpu_set_window(dpu, false);
++		return;
++	}
++
++	for (i = 0; i < ARRAY_SIZE(gs201_dpu_formats); i++)
++		if (gs201_dpu_formats[i].fourcc == fb->format->format)
++			fmt = gs201_dpu_formats[i].hw;
++
++	obj = drm_fb_dma_get_gem_obj(fb, 0);
++	cpp = fb->format->cpp[0];
++
++	val = readl(dpu->dma + RDMA_IN_CTRL_0);
++	val = (val & ~IDMA_IMG_FORMAT_MASK) | IDMA_IMG_FORMAT(fmt);
++	writel(val, dpu->dma + RDMA_IN_CTRL_0);
++	/* RGB stride is given by the source width in pixels. */
++	writel((fb->height << 16) | (fb->pitches[0] / cpp),
++	       dpu->dma + RDMA_SRC_SIZE);
++	writel(((new->src.y1 >> 16) << 16) | (new->src.x1 >> 16),
++	       dpu->dma + RDMA_SRC_OFFSET);
++	writel((dpu->height << 16) | dpu->width, dpu->dma + RDMA_IMG_SIZE);
++	writel(0, dpu->dma + RDMA_SRC_STRIDE_1);
++	writel(obj->dma_addr + fb->offsets[0], dpu->dma + RDMA_BASEADDR_Y8);
++
++	gs201_dpu_set_window(dpu, true);
++}
++
++static void gs201_dpu_plane_atomic_disable(struct drm_plane *plane,
++					   struct drm_atomic_commit *state)
++{
++	gs201_dpu_set_window(to_dpu(plane->dev), false);
++}
++
++static const struct drm_plane_helper_funcs gs201_dpu_plane_helper_funcs = {
++	.atomic_check = gs201_dpu_plane_atomic_check,
++	.atomic_update = gs201_dpu_plane_atomic_update,
++	.atomic_disable = gs201_dpu_plane_atomic_disable,
++};
++
++static const struct drm_plane_funcs gs201_dpu_plane_funcs = {
++	.update_plane = drm_atomic_helper_update_plane,
++	.disable_plane = drm_atomic_helper_disable_plane,
++	.destroy = drm_plane_cleanup,
++	.reset = drm_atomic_helper_plane_reset,
++	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
++};
++
++static enum drm_mode_status
++gs201_dpu_crtc_mode_valid(struct drm_crtc *crtc,
++			  const struct drm_display_mode *mode)
++{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++
++	if (mode->hdisplay != dpu->width || mode->vdisplay != dpu->height)
++		return MODE_BAD;
++
++	return MODE_OK;
++}
++
++static void gs201_dpu_crtc_atomic_flush(struct drm_crtc *crtc,
++					struct drm_atomic_commit *state)
++{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++	struct drm_pending_vblank_event *event;
++	unsigned long flags;
++
++	if (!crtc->state->active)
++		return;
++
++	event = crtc->state->event;
++	crtc->state->event = NULL;
++
++	/*
++	 * Holding a vblank reference keeps the TE trigger running until the
++	 * update has been sent to the panel.
++	 */
++	if (drm_crtc_vblank_get(crtc)) {
++		if (event) {
++			spin_lock_irqsave(&dpu->drm.event_lock, flags);
++			drm_crtc_send_vblank_event(crtc, event);
++			spin_unlock_irqrestore(&dpu->drm.event_lock, flags);
++		}
++		return;
++	}
++
++	spin_lock_irqsave(&dpu->drm.event_lock, flags);
++	if (dpu->update_pending) {
++		/* Merged into the update that is still waiting for a frame */
++		drm_crtc_vblank_put(crtc);
++		if (dpu->event && event) {
++			drm_crtc_send_vblank_event(crtc, dpu->event);
++			dpu->event = NULL;
++		}
++	}
++	if (event)
++		dpu->event = event;
++	dpu->update_pending = true;
++	gs201_dpu_request_update(dpu);
++	spin_unlock_irqrestore(&dpu->drm.event_lock, flags);
++}
++
++static void gs201_dpu_crtc_atomic_enable(struct drm_crtc *crtc,
++					 struct drm_atomic_commit *state)
++{
++	drm_crtc_vblank_on(crtc);
++}
++
++static void gs201_dpu_crtc_atomic_disable(struct drm_crtc *crtc,
++					  struct drm_atomic_commit *state)
++{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++	unsigned long flags;
++	u32 val;
++
++	/*
++	 * The panel can't be switched off without a DSI host driver, so push
++	 * one black frame instead.
++	 */
++	gs201_dpu_set_window(dpu, false);
++	gs201_dpu_request_update(dpu);
++	gs201_dpu_set_trigger(dpu, true);
++	readl_poll_timeout(dpu->decon + DECON_SHD_REG_UP_REQ, val, !val,
++			   1000, 100000);
++
++	drm_crtc_vblank_off(crtc);
++	gs201_dpu_set_trigger(dpu, false);
++
++	spin_lock_irqsave(&dpu->drm.event_lock, flags);
++	if (dpu->update_pending) {
++		dpu->update_pending = false;
++		drm_crtc_vblank_put(crtc);
++	}
++	if (dpu->event) {
++		drm_crtc_send_vblank_event(crtc, dpu->event);
++		dpu->event = NULL;
++	}
++	if (crtc->state->event) {
++		drm_crtc_send_vblank_event(crtc, crtc->state->event);
++		crtc->state->event = NULL;
++	}
++	spin_unlock_irqrestore(&dpu->drm.event_lock, flags);
++}
++
++static const struct drm_crtc_helper_funcs gs201_dpu_crtc_helper_funcs = {
++	.mode_valid = gs201_dpu_crtc_mode_valid,
++	.atomic_flush = gs201_dpu_crtc_atomic_flush,
++	.atomic_enable = gs201_dpu_crtc_atomic_enable,
++	.atomic_disable = gs201_dpu_crtc_atomic_disable,
++};
++
++static int gs201_dpu_enable_vblank(struct drm_crtc *crtc)
++{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++
++	writel(INT_EN | INT_EN_FRAME_START, dpu->decon + DECON_INT_EN);
++	gs201_dpu_set_trigger(dpu, true);
++
++	return 0;
++}
++
++static void gs201_dpu_disable_vblank(struct drm_crtc *crtc)
++{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++
++	gs201_dpu_set_trigger(dpu, false);
++	writel(0, dpu->decon + DECON_INT_EN);
++}
++
++static u32 gs201_dpu_get_vblank_counter(struct drm_crtc *crtc)
++{
++	return readl(to_dpu(crtc->dev)->decon + DECON_FRAME_COUNT);
++}
++
++static const struct drm_crtc_funcs gs201_dpu_crtc_funcs = {
++	.reset = drm_atomic_helper_crtc_reset,
++	.destroy = drm_crtc_cleanup,
++	.set_config = drm_atomic_helper_set_config,
++	.page_flip = drm_atomic_helper_page_flip,
++	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_crtc_destroy_state,
++	.enable_vblank = gs201_dpu_enable_vblank,
++	.disable_vblank = gs201_dpu_disable_vblank,
++	.get_vblank_counter = gs201_dpu_get_vblank_counter,
++};
++
++static int gs201_dpu_connector_get_modes(struct drm_connector *connector)
++{
++	struct gs201_dpu *dpu = to_dpu(connector->dev);
++	struct drm_display_mode *mode;
++
++	mode = drm_mode_create(connector->dev);
++	if (!mode)
++		return 0;
++
++	/* Command mode: only the active area and the TE rate are real. */
++	mode->hdisplay = dpu->width;
++	mode->hsync_start = dpu->width + 1;
++	mode->hsync_end = dpu->width + 2;
++	mode->htotal = dpu->width + 3;
++	mode->vdisplay = dpu->height;
++	mode->vsync_start = dpu->height + 1;
++	mode->vsync_end = dpu->height + 2;
++	mode->vtotal = dpu->height + 3;
++	mode->clock = mode->htotal * mode->vtotal * 60 / 1000;
++	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
++	mode->width_mm = dpu->width_mm;
++	mode->height_mm = dpu->height_mm;
++	drm_mode_set_name(mode);
++	drm_mode_probed_add(connector, mode);
++
++	connector->display_info.width_mm = dpu->width_mm;
++	connector->display_info.height_mm = dpu->height_mm;
++
++	return 1;
++}
++
++static const struct drm_connector_helper_funcs gs201_dpu_connector_helper_funcs = {
++	.get_modes = gs201_dpu_connector_get_modes,
++};
++
++static const struct drm_connector_funcs gs201_dpu_connector_funcs = {
++	.reset = drm_atomic_helper_connector_reset,
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.destroy = drm_connector_cleanup,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++static const struct drm_mode_config_funcs gs201_dpu_mode_config_funcs = {
++	.fb_create = drm_gem_fb_create_with_dirty,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++static const struct drm_mode_config_helper_funcs gs201_dpu_mode_config_helpers = {
++	.atomic_commit_tail = drm_atomic_helper_commit_tail_rpm,
++};
++
++DEFINE_DRM_GEM_DMA_FOPS(gs201_dpu_fops);
++
++/*
++ * Mesa's kmsro pairs scanout-only KMS devices with the render GPU by driver
++ * name; "exynos" is the entry matching this display engine family.
++ */
++static const struct drm_driver gs201_dpu_driver = {
++	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
++	.fops = &gs201_dpu_fops,
++	DRM_GEM_DMA_DRIVER_OPS,
++	DRM_FBDEV_DMA_DRIVER_OPS,
++	.name = "exynos",
++	.desc = "Google gs201 DPU",
++	.major = 1,
++	.minor = 0,
++};
++
++static int gs201_dpu_adopt(struct gs201_dpu *dpu, struct device *dev,
++			   void __iomem *dma_base)
++{
++	u32 global = readl(dpu->decon + DECON_GLOBAL_CON);
++	u32 size = readl(dpu->decon + DECON_BLD_BG_IMG_SIZE_PRI);
++	unsigned int w, ch;
++
++	if (!(global & GLOBAL_CON_DECON_EN) ||
++	    !(global & GLOBAL_CON_OPERATION_MODE_CMD))
++		return dev_err_probe(dev, -ENODEV,
++				     "DECON not running in command mode (%#x)\n",
++				     global);
++
++	for (w = 0; w < DECON_MAX_WIN; w++)
++		if (readl(dpu->wincon + DECON_CON_WIN(w)) & WIN_EN)
++			break;
++	if (w == DECON_MAX_WIN)
++		return dev_err_probe(dev, -ENODEV, "no enabled DECON window\n");
++
++	ch = WIN_CHMAP_GET(readl(dpu->wincon + DECON_CON_WIN(w)));
++	if (ch >= DPP_MAX_CH)
++		return dev_err_probe(dev, -ENODEV, "unsupported DPP %u\n", ch);
++
++	dpu->win_id = w;
++	dpu->dma = dma_base + ch * 0x1000;
++	dpu->width = size & 0x3fff;
++	dpu->height = (size >> 16) & 0x3fff;
++
++	dev_info(dev, "adopting %ux%u, window %u, DPP %u\n",
++		 dpu->width, dpu->height, w, ch);
++
++	return 0;
++}
++
++static int gs201_dpu_probe(struct platform_device *pdev)
++{
++	u32 formats[ARRAY_SIZE(gs201_dpu_formats)];
++	struct device *dev = &pdev->dev;
++	struct device_node *panel;
++	struct gs201_dpu *dpu;
++	struct drm_device *drm;
++	void __iomem *dma_base;
++	unsigned int i;
++	int irq, ret;
++
++	dpu = devm_drm_dev_alloc(dev, &gs201_dpu_driver, struct gs201_dpu, drm);
++	if (IS_ERR(dpu))
++		return PTR_ERR(dpu);
++	drm = &dpu->drm;
++
++	dpu->decon = devm_platform_ioremap_resource_byname(pdev, "main");
++	if (IS_ERR(dpu->decon))
++		return PTR_ERR(dpu->decon);
++	dpu->win = devm_platform_ioremap_resource_byname(pdev, "win");
++	if (IS_ERR(dpu->win))
++		return PTR_ERR(dpu->win);
++	dpu->wincon = devm_platform_ioremap_resource_byname(pdev, "wincon");
++	if (IS_ERR(dpu->wincon))
++		return PTR_ERR(dpu->wincon);
++	dma_base = devm_platform_ioremap_resource_byname(pdev, "dma");
++	if (IS_ERR(dma_base))
++		return PTR_ERR(dma_base);
++
++	ret = gs201_dpu_adopt(dpu, dev, dma_base);
++	if (ret)
++		return ret;
++
++	panel = of_parse_phandle(dev->of_node, "panel", 0);
++	if (panel) {
++		of_property_read_u32(panel, "width-mm", &dpu->width_mm);
++		of_property_read_u32(panel, "height-mm", &dpu->height_mm);
++		of_node_put(panel);
++	}
++
++	/* The DMA reads physical addresses (its SysMMU is left in bypass). */
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++
++	ret = drmm_mode_config_init(drm);
++	if (ret)
++		return ret;
++	drm->mode_config.min_width = dpu->width;
++	drm->mode_config.max_width = 4096;
++	drm->mode_config.min_height = dpu->height;
++	drm->mode_config.max_height = 4096;
++	drm->mode_config.funcs = &gs201_dpu_mode_config_funcs;
++	drm->mode_config.helper_private = &gs201_dpu_mode_config_helpers;
++
++	for (i = 0; i < ARRAY_SIZE(gs201_dpu_formats); i++)
++		formats[i] = gs201_dpu_formats[i].fourcc;
++
++	ret = drm_universal_plane_init(drm, &dpu->plane, 0,
++				       &gs201_dpu_plane_funcs, formats,
++				       ARRAY_SIZE(formats), NULL,
++				       DRM_PLANE_TYPE_PRIMARY, NULL);
++	if (ret)
++		return ret;
++	drm_plane_helper_add(&dpu->plane, &gs201_dpu_plane_helper_funcs);
++
++	ret = drm_crtc_init_with_planes(drm, &dpu->crtc, &dpu->plane, NULL,
++					&gs201_dpu_crtc_funcs, NULL);
++	if (ret)
++		return ret;
++	drm_crtc_helper_add(&dpu->crtc, &gs201_dpu_crtc_helper_funcs);
++
++	ret = drmm_encoder_init(drm, &dpu->encoder, NULL, DRM_MODE_ENCODER_DSI,
++			       NULL);
++	if (ret)
++		return ret;
++	dpu->encoder.possible_crtcs = drm_crtc_mask(&dpu->crtc);
++
++	ret = drm_connector_init(drm, &dpu->connector,
++				 &gs201_dpu_connector_funcs,
++				 DRM_MODE_CONNECTOR_DSI);
++	if (ret)
++		return ret;
++	drm_connector_helper_add(&dpu->connector,
++				 &gs201_dpu_connector_helper_funcs);
++	ret = drm_connector_attach_encoder(&dpu->connector, &dpu->encoder);
++	if (ret)
++		return ret;
++
++	ret = drm_vblank_init(drm, 1);
++	if (ret)
++		return ret;
++	drm->max_vblank_count = 0xffffffff;
++	/* Stop sending frames to the panel as soon as nothing is updating. */
++	drm->vblank_disable_immediate = true;
++
++	drm_mode_config_reset(drm);
++
++	/* Stop the free-running trigger left by the bootloader. */
++	writel(0, dpu->decon + DECON_INT_EN);
++	writel(~0, dpu->decon + DECON_INT_PEND);
++	gs201_dpu_set_trigger(dpu, false);
++
++	irq = platform_get_irq_byname(pdev, "frame_start");
++	if (irq < 0)
++		return irq;
++	ret = devm_request_irq(dev, irq, gs201_dpu_irq, 0, dev_name(dev), dpu);
++	if (ret)
++		return ret;
++
++	ret = aperture_remove_all_conflicting_devices(gs201_dpu_driver.name);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, drm);
++
++	ret = drm_dev_register(drm, 0);
++	if (ret)
++		return ret;
++
++	drm_client_setup(drm, NULL);
++
++	return 0;
++}
++
++static void gs201_dpu_remove(struct platform_device *pdev)
++{
++	struct drm_device *drm = platform_get_drvdata(pdev);
++
++	drm_dev_unplug(drm);
++	drm_atomic_helper_shutdown(drm);
++}
++
++static void gs201_dpu_shutdown(struct platform_device *pdev)
++{
++	drm_atomic_helper_shutdown(platform_get_drvdata(pdev));
++}
++
++static const struct of_device_id gs201_dpu_of_match[] = {
++	{ .compatible = "google,gs201-decon" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gs201_dpu_of_match);
++
++static struct platform_driver gs201_dpu_platform_driver = {
++	.probe = gs201_dpu_probe,
++	.remove = gs201_dpu_remove,
++	.shutdown = gs201_dpu_shutdown,
++	.driver = {
++		.name = "gs201-dpu",
++		.of_match_table = gs201_dpu_of_match,
++	},
++};
++module_platform_driver(gs201_dpu_platform_driver);
++
++MODULE_DESCRIPTION("Google gs201 display controller driver");
++MODULE_LICENSE("GPL");
 diff --git a/drivers/gpu/drm/panthor/panthor_drv.c b/drivers/gpu/drm/panthor/panthor_drv.c
 index 46a3080b0..1978067c4 100644
 --- a/drivers/gpu/drm/panthor/panthor_drv.c
