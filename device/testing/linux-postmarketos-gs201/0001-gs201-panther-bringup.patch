@@ -3362,10 +3362,10 @@ index 000000000..b66ba2bcd
 +obj-$(CONFIG_DRM_GS201_DPU) += gs201-dpu.o
 diff --git a/drivers/gpu/drm/google/gs201-dpu.c b/drivers/gpu/drm/google/gs201-dpu.c
 new file mode 100644
-index 000000000..6fee8c12b
+index 000000000..b4c93934f
 --- /dev/null
 +++ b/drivers/gpu/drm/google/gs201-dpu.c
-@@ -0,0 +1,880 @@
+@@ -0,0 +1,900 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Tensor G2 (gs201) display controller (DECON + DPP DMA).
@@ -3406,6 +3406,7 @@ index 000000000..6fee8c12b
 +#include <drm/drm_gem_framebuffer_helper.h>
 +#include <drm/drm_mipi_dsi.h>
 +#include <video/mipi_display.h>
++#include <drm/drm_modeset_helper.h>
 +#include <drm/drm_modeset_helper_vtables.h>
 +#include <drm/drm_panel.h>
 +#include <drm/drm_print.h>
@@ -4233,6 +4234,24 @@ index 000000000..6fee8c12b
 +};
 +MODULE_DEVICE_TABLE(of, gs201_dpu_of_match);
 +
++/* Turn the panel off over system suspend, whatever userspace has done. */
++static int gs201_dpu_suspend(struct device *dev)
++{
++	struct gs201_dpu *dpu = dev_get_drvdata(dev);
++
++	return dpu->registered ? drm_mode_config_helper_suspend(&dpu->drm) : 0;
++}
++
++static int gs201_dpu_resume(struct device *dev)
++{
++	struct gs201_dpu *dpu = dev_get_drvdata(dev);
++
++	return dpu->registered ? drm_mode_config_helper_resume(&dpu->drm) : 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(gs201_dpu_pm_ops, gs201_dpu_suspend,
++				gs201_dpu_resume);
++
 +static struct platform_driver gs201_dpu_platform_driver = {
 +	.probe = gs201_dpu_probe,
 +	.remove = gs201_dpu_remove,
@@ -4240,6 +4259,7 @@ index 000000000..6fee8c12b
 +	.driver = {
 +		.name = "gs201-dpu",
 +		.of_match_table = gs201_dpu_of_match,
++		.pm = pm_sleep_ptr(&gs201_dpu_pm_ops),
 +	},
 +};
 +module_platform_driver(gs201_dpu_platform_driver);
@@ -7330,7 +7350,7 @@ index 6a849f4a9..1d0233c61 100644
  
  #endif /* BRCMFMAC_MSGBUF_H */
 diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
-index 55f4d7b97..a57559973 100644
+index 55f4d7b97..e98573f91 100644
 --- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
 +++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
 @@ -71,6 +71,9 @@ BRCMF_FW_CLM_DEF(4377B3, "brcmfmac4377b3-pcie");
@@ -8205,9 +8225,7 @@ index 55f4d7b97..a57559973 100644
 +#define BRCMF_VSTATUS_MAGIC		0xfeedfe54
 +#define BRCMF_VSTATUS_SIZE		0x28
 +#define BRCMF_END_MAGIC			0xfeed0e2d
- 
--static noinline_for_stack void
--brcmf_pcie_provide_random_bytes(struct brcmf_pciedev_info *devinfo, u32 address)
++
 +static int brcmf_pcie_alloc_rtlv(struct brcmf_pciedev_info *devinfo,
 +				 u32 *address, u32 type, size_t length)
 +{
@@ -8242,7 +8260,9 @@ index 55f4d7b97..a57559973 100644
 +	brcmf_pcie_tcm_toio(devinfo, *address - sizeof(footer), &footer,
 +			    sizeof(footer));
 +	*address = start_addr;
-+
+ 
+-static noinline_for_stack void
+-brcmf_pcie_provide_random_bytes(struct brcmf_pciedev_info *devinfo, u32 address)
 +	return 0;
 +}
 +
@@ -8251,13 +8271,13 @@ index 55f4d7b97..a57559973 100644
  {
  	u8 randbuf[BRCMF_RANDOM_SEED_LENGTH];
 +	int err;
- 
++
 +	err = brcmf_pcie_alloc_rtlv(devinfo, address,
 +				    BRCMF_RANDOM_SEED_MAGIC,
 +				    BRCMF_RANDOM_SEED_LENGTH);
 +	if (err)
 +		return err;
-+
+ 
 +	brcmf_dbg(PCIE, "Download random seed\n");
  	get_random_bytes(randbuf, BRCMF_RANDOM_SEED_LENGTH);
 -	memcpy_toio(devinfo->tcm + address, randbuf, BRCMF_RANDOM_SEED_LENGTH);
@@ -8634,16 +8654,24 @@ index 55f4d7b97..a57559973 100644
  	bus->wowl_supported = pci_pme_capable(pdev, PCI_D3hot);
  	bus->fwvid = drvdata[id->driver_data].vendor;
  	devinfo->fwseed = drvdata[id->driver_data].fw_seed;
-@@ -2677,7 +3111,7 @@ static int brcmf_pcie_pm_leave_D3(struct device *dev)
+@@ -2677,10 +3111,14 @@ static int brcmf_pcie_pm_leave_D3(struct device *dev)
  	brcmf_dbg(PCIE, "Enter, dev=%p, bus=%p\n", dev, bus);
  
  	/* Check if device is still up and running, if so we are ready */
 -	if (brcmf_pcie_read_reg32(devinfo, devinfo->reginfo->intmask) != 0) {
 +	if (brcmf_pcie_read_pcie32(devinfo, devinfo->reginfo->intmask) != 0) {
  		brcmf_dbg(PCIE, "Try to wakeup device....\n");
- 		if (brcmf_pcie_send_mb_data(devinfo, BRCMF_H2D_HOST_D0_INFORM))
+-		if (brcmf_pcie_send_mb_data(devinfo, BRCMF_H2D_HOST_D0_INFORM))
++		/* Mailbox data may go through the control ring, which needs UP */
++		devinfo->state = BRCMFMAC_PCIE_STATE_UP;
++		if (brcmf_pcie_send_mb_data(devinfo, BRCMF_H2D_HOST_D0_INFORM)) {
++			devinfo->state = BRCMFMAC_PCIE_STATE_DOWN;
  			goto cleanup;
-@@ -2760,6 +3194,8 @@ static const struct pci_device_id brcmf_pcie_devid_table[] = {
++		}
+ 		brcmf_dbg(PCIE, "Hot resume, continue....\n");
+ 		devinfo->state = BRCMFMAC_PCIE_STATE_UP;
+ 		brcmf_pcie_select_core(devinfo, BCMA_CORE_PCIE2);
+@@ -2760,6 +3198,8 @@ static const struct pci_device_id brcmf_pcie_devid_table[] = {
  	BRCMF_PCIE_DEVICE(BRCM_PCIE_4377_DEVICE_ID, WCC_SEED),
  	BRCMF_PCIE_DEVICE(BRCM_PCIE_4378_DEVICE_ID, WCC_SEED),
  	BRCMF_PCIE_DEVICE(BRCM_PCIE_4387_DEVICE_ID, WCC_SEED),
@@ -9166,10 +9194,10 @@ index d4f88cfc6..b09cc858e 100644
  obj-$(CONFIG_PCIE_NXP_S32G) += pcie-nxp-s32g.o
 diff --git a/drivers/pci/controller/dwc/pcie-gs201.c b/drivers/pci/controller/dwc/pcie-gs201.c
 new file mode 100644
-index 000000000..dad2136a1
+index 000000000..95ee7007a
 --- /dev/null
 +++ b/drivers/pci/controller/dwc/pcie-gs201.c
-@@ -0,0 +1,465 @@
+@@ -0,0 +1,479 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * PCIe host controller driver for Google gs201 (Tensor G2) SoC.
@@ -9622,6 +9650,20 @@ index 000000000..dad2136a1
 +	{ }
 +};
 +MODULE_DEVICE_TABLE(of, gs201_pcie_of_match);
++
++/*
++ * D3hot puts the link into PCI-PM L1, which (like ASPM L1) drops the link
++ * and resets the endpoint. Keep devices behind this controller in D0.
++ */
++static void gs201_pcie_quirk_no_d3(struct pci_dev *pdev)
++{
++	struct pci_host_bridge *bridge = pci_find_host_bridge(pdev->bus);
++	struct device *host = bridge->dev.parent;
++
++	if (host && of_match_node(gs201_pcie_of_match, host->of_node))
++		pdev->dev_flags |= PCI_DEV_FLAGS_NO_D3;
++}
++DECLARE_PCI_FIXUP_FINAL(PCI_ANY_ID, PCI_ANY_ID, gs201_pcie_quirk_no_d3);
 +
 +static struct platform_driver gs201_pcie_driver = {
 +	.probe = gs201_pcie_probe,
