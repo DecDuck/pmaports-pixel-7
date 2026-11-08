@@ -130,10 +130,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..73e3b8203
+index 000000000..a4c8072ee
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,513 @@
+@@ -0,0 +1,506 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -193,17 +193,6 @@ index 000000000..73e3b8203
 +		};
 +	};
 +
-+	/*
-+	 * Physical size of the S6E3FC3 panel (6.3", 1080x2400 @ ~416ppi), so
-+	 * compositors pick a sensible scale. No panel driver yet.
-+	 */
-+	panel: panel {
-+		width-mm = <66>;
-+		height-mm = <147>;
-+		/* not a device: only describes the panel to the display driver */
-+		status = "disabled";
-+	};
-+
 +	chosen {
 +		/* Bootloader expects bootargs to exist, otherwise it crashes */
 +		bootargs = "";
@@ -214,7 +203,6 @@ index 000000000..73e3b8203
 +		framebuffer0: framebuffer-0 {
 +			compatible = "simple-framebuffer";
 +			memory-region = <&cont_splash_mem>;
-+			panel = <&panel>;
 +			width = <1080>;
 +			height = <2400>;
 +			stride = <(1080 * 4)>;
@@ -243,8 +231,13 @@ index 000000000..73e3b8203
 +};
 +
 +&decon0 {
-+	panel = <&panel>;
 +	status = "okay";
++
++	panel@0 {
++		compatible = "samsung,s6e3fc3-p10";
++		reg = <0>;
++		reset-gpios = <&gpa7 1 GPIO_ACTIVE_LOW>;
++	};
 +};
 +
 +&ufs_0 {
@@ -1101,10 +1094,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..d0a99a3c6
+index 000000000..f51d1e5c6
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1564 @@
+@@ -0,0 +1,1567 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -2187,10 +2180,13 @@ index 000000000..d0a99a3c6
 +			reg = <0x1c240000 0x1000>,
 +			      <0x1c250000 0x6000>,
 +			      <0x1c270000 0x6000>,
-+			      <0x1c0b0000 0x6000>;
-+			reg-names = "main", "win", "wincon", "dma";
++			      <0x1c0b0000 0x6000>,
++			      <0x1c2c0000 0x100>;
++			reg-names = "main", "win", "wincon", "dma", "dsim";
 +			interrupts = <GIC_SPI 241 IRQ_TYPE_LEVEL_HIGH>;
 +			interrupt-names = "frame_start";
++			#address-cells = <1>;
++			#size-cells = <0>;
 +			status = "disabled";
 +		};
 +
@@ -3338,10 +3334,10 @@ index e635fcffd..a1185c070 100644
  obj-$(CONFIG_DRM_UDL) += udl/
 diff --git a/drivers/gpu/drm/google/Kconfig b/drivers/gpu/drm/google/Kconfig
 new file mode 100644
-index 000000000..863f31049
+index 000000000..9e553cd37
 --- /dev/null
 +++ b/drivers/gpu/drm/google/Kconfig
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,15 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +config DRM_GS201_DPU
 +	tristate "Google gs201 (Tensor G2) display controller"
@@ -3350,11 +3346,13 @@ index 000000000..863f31049
 +	select DRM_CLIENT_SELECTION
 +	select DRM_GEM_DMA_HELPER
 +	select DRM_KMS_HELPER
++	select DRM_MIPI_DSI
 +	select APERTURE_HELPERS
 +	help
 +	  Display controller (DECON with DPP DMA) of the Google gs201 SoC.
 +	  It takes over the command-mode DSI pipeline set up by the
-+	  bootloader and scans out DRM framebuffers on it.
++	  bootloader, scans out DRM framebuffers on it and acts as the MIPI
++	  DSI host for the panel.
 diff --git a/drivers/gpu/drm/google/Makefile b/drivers/gpu/drm/google/Makefile
 new file mode 100644
 index 000000000..b66ba2bcd
@@ -3364,10 +3362,10 @@ index 000000000..b66ba2bcd
 +obj-$(CONFIG_DRM_GS201_DPU) += gs201-dpu.o
 diff --git a/drivers/gpu/drm/google/gs201-dpu.c b/drivers/gpu/drm/google/gs201-dpu.c
 new file mode 100644
-index 000000000..c2f1ae440
+index 000000000..6fee8c12b
 --- /dev/null
 +++ b/drivers/gpu/drm/google/gs201-dpu.c
-@@ -0,0 +1,663 @@
+@@ -0,0 +1,880 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Tensor G2 (gs201) display controller (DECON + DPP DMA).
@@ -3375,8 +3373,9 @@ index 000000000..c2f1ae440
 + * The bootloader brings up DECON0 -> DSIM0 -> panel in command mode, with
 + * the panel's TE line triggering a frame transfer, and scans out its splash
 + * buffer through one DPP DMA channel on one DECON window. This driver adopts
-+ * that pipeline as-is and only reprograms the scanout buffer, so DSIM and the
-+ * panel are not touched.
++ * that pipeline as-is and only reprograms the scanout buffer. The DSIM link is
++ * left as configured and is only used as a MIPI DSI host to send commands to
++ * the panel, which is handled by a separate panel driver.
 + *
 + * Command-mode panels keep the last frame in their own RAM, so the TE trigger
 + * is only unmasked while DRM vblank is enabled: frames are sent while
@@ -3389,6 +3388,7 @@ index 000000000..c2f1ae440
 +#include <linux/io.h>
 +#include <linux/iopoll.h>
 +#include <linux/module.h>
++#include <linux/mutex.h>
 +#include <linux/of.h>
 +#include <linux/platform_device.h>
 +
@@ -3404,7 +3404,10 @@ index 000000000..c2f1ae440
 +#include <drm/drm_framebuffer.h>
 +#include <drm/drm_gem_dma_helper.h>
 +#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_mipi_dsi.h>
++#include <video/mipi_display.h>
 +#include <drm/drm_modeset_helper_vtables.h>
++#include <drm/drm_panel.h>
 +#include <drm/drm_print.h>
 +#include <drm/drm_probe_helper.h>
 +#include <drm/drm_vblank.h>
@@ -3449,6 +3452,25 @@ index 000000000..c2f1ae440
 +#define RDMA_SRC_STRIDE_1		0x0054
 +#define DPP_MAX_CH			6
 +
++/* DSIM link */
++#define DSIM_LINK_STATUS1		0x000c
++#define  DSIM_LINK_STATUS1_CMD_LOCK	BIT(25)
++#define DSIM_ESCMODE			0x002c
++#define  DSIM_ESCMODE_CMD_LPDT		BIT(7)
++#define DSIM_INTSRC			0x0050
++#define  DSIM_INTSRC_BTA_TOUT		BIT(20)
++#define  DSIM_INTSRC_RX_DATA_DONE	BIT(18)
++#define  DSIM_INTSRC_RX_ACK		BIT(16)
++#define DSIM_PKTHDR			0x0058
++#define  DSIM_PKTHDR_BTA		BIT(24)
++#define DSIM_PAYLOAD			0x005c
++#define DSIM_RXFIFO			0x0060
++#define DSIM_FIFOCTRL			0x0068
++#define  DSIM_FIFOCTRL_EMPTY_RX		BIT(12)
++#define  DSIM_FIFOCTRL_EMPTY_PH		BIT(10)
++#define  DSIM_FIFOCTRL_EMPTY_PL		BIT(8)
++#define DSIM_TIMEOUT_US			100000
++
 +/* Format codes describe the byte order in memory. */
 +static const struct {
 +	u32 fourcc;
@@ -3469,9 +3491,20 @@ index 000000000..c2f1ae440
 +	void __iomem *win;
 +	void __iomem *wincon;
 +	void __iomem *dma;
++	void __iomem *dsim;
 +	unsigned int win_id;
 +	unsigned int width, height;
-+	u32 width_mm, height_mm;
++	int irq;
++
++	/* users of the frame trigger: vblank and stalled DSI commands */
++	spinlock_t trig_lock;
++	unsigned int trig_refs;
++
++	struct mipi_dsi_host dsi_host;
++	/* serialises DSI transfers */
++	struct mutex dsi_lock;
++	struct drm_panel *panel;
++	bool registered;
 +
 +	/* event and update_pending are protected by drm.event_lock */
 +	struct drm_pending_vblank_event *event;
@@ -3492,6 +3525,26 @@ index 000000000..c2f1ae440
 +	decon_write_mask(dpu, DECON_TRIG_CON,
 +			 run ? TRIG_CON_HW_TRIG_EN : TRIG_CON_HW_TRIG_MASK_DECON,
 +			 TRIG_CON_HW_TRIG_EN | TRIG_CON_HW_TRIG_MASK_DECON);
++}
++
++static void gs201_dpu_trigger_get(struct gs201_dpu *dpu)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&dpu->trig_lock, flags);
++	if (!dpu->trig_refs++)
++		gs201_dpu_set_trigger(dpu, true);
++	spin_unlock_irqrestore(&dpu->trig_lock, flags);
++}
++
++static void gs201_dpu_trigger_put(struct gs201_dpu *dpu)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&dpu->trig_lock, flags);
++	if (!WARN_ON(!dpu->trig_refs) && !--dpu->trig_refs)
++		gs201_dpu_set_trigger(dpu, false);
++	spin_unlock_irqrestore(&dpu->trig_lock, flags);
 +}
 +
 +static void gs201_dpu_request_update(struct gs201_dpu *dpu)
@@ -3689,6 +3742,11 @@ index 000000000..c2f1ae440
 +static void gs201_dpu_crtc_atomic_enable(struct drm_crtc *crtc,
 +					 struct drm_atomic_commit *state)
 +{
++	struct gs201_dpu *dpu = to_dpu(crtc->dev);
++
++	/* The frame trigger stays masked while the panel is (re)initialised. */
++	drm_panel_prepare(dpu->panel);
++	drm_panel_enable(dpu->panel);
 +	drm_crtc_vblank_on(crtc);
 +}
 +
@@ -3697,20 +3755,11 @@ index 000000000..c2f1ae440
 +{
 +	struct gs201_dpu *dpu = to_dpu(crtc->dev);
 +	unsigned long flags;
-+	u32 val;
-+
-+	/*
-+	 * The panel can't be switched off without a DSI host driver, so push
-+	 * one black frame instead.
-+	 */
-+	gs201_dpu_set_window(dpu, false);
-+	gs201_dpu_request_update(dpu);
-+	gs201_dpu_set_trigger(dpu, true);
-+	readl_poll_timeout(dpu->decon + DECON_SHD_REG_UP_REQ, val, !val,
-+			   1000, 100000);
 +
 +	drm_crtc_vblank_off(crtc);
-+	gs201_dpu_set_trigger(dpu, false);
++
++	drm_panel_disable(dpu->panel);
++	drm_panel_unprepare(dpu->panel);
 +
 +	spin_lock_irqsave(&dpu->drm.event_lock, flags);
 +	if (dpu->update_pending) {
@@ -3740,7 +3789,7 @@ index 000000000..c2f1ae440
 +	struct gs201_dpu *dpu = to_dpu(crtc->dev);
 +
 +	writel(INT_EN | INT_EN_FRAME_START, dpu->decon + DECON_INT_EN);
-+	gs201_dpu_set_trigger(dpu, true);
++	gs201_dpu_trigger_get(dpu);
 +
 +	return 0;
 +}
@@ -3749,7 +3798,7 @@ index 000000000..c2f1ae440
 +{
 +	struct gs201_dpu *dpu = to_dpu(crtc->dev);
 +
-+	gs201_dpu_set_trigger(dpu, false);
++	gs201_dpu_trigger_put(dpu);
 +	writel(0, dpu->decon + DECON_INT_EN);
 +}
 +
@@ -3772,33 +3821,7 @@ index 000000000..c2f1ae440
 +
 +static int gs201_dpu_connector_get_modes(struct drm_connector *connector)
 +{
-+	struct gs201_dpu *dpu = to_dpu(connector->dev);
-+	struct drm_display_mode *mode;
-+
-+	mode = drm_mode_create(connector->dev);
-+	if (!mode)
-+		return 0;
-+
-+	/* Command mode: only the active area and the TE rate are real. */
-+	mode->hdisplay = dpu->width;
-+	mode->hsync_start = dpu->width + 1;
-+	mode->hsync_end = dpu->width + 2;
-+	mode->htotal = dpu->width + 3;
-+	mode->vdisplay = dpu->height;
-+	mode->vsync_start = dpu->height + 1;
-+	mode->vsync_end = dpu->height + 2;
-+	mode->vtotal = dpu->height + 3;
-+	mode->clock = mode->htotal * mode->vtotal * 60 / 1000;
-+	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
-+	mode->width_mm = dpu->width_mm;
-+	mode->height_mm = dpu->height_mm;
-+	drm_mode_set_name(mode);
-+	drm_mode_probed_add(connector, mode);
-+
-+	connector->display_info.width_mm = dpu->width_mm;
-+	connector->display_info.height_mm = dpu->height_mm;
-+
-+	return 1;
++	return drm_panel_get_modes(to_dpu(connector->dev)->panel, connector);
 +}
 +
 +static const struct drm_connector_helper_funcs gs201_dpu_connector_helper_funcs = {
@@ -3874,50 +3897,152 @@ index 000000000..c2f1ae440
 +	return 0;
 +}
 +
-+static int gs201_dpu_probe(struct platform_device *pdev)
++static int gs201_dsim_fifo_empty(struct gs201_dpu *dpu, unsigned long us)
 +{
-+	u32 formats[ARRAY_SIZE(gs201_dpu_formats)];
-+	struct device *dev = &pdev->dev;
-+	struct device_node *panel;
-+	struct gs201_dpu *dpu;
-+	struct drm_device *drm;
-+	void __iomem *dma_base;
-+	unsigned int i;
-+	int irq, ret;
++	const u32 mask = DSIM_FIFOCTRL_EMPTY_PH | DSIM_FIFOCTRL_EMPTY_PL;
++	u32 val;
 +
-+	dpu = devm_drm_dev_alloc(dev, &gs201_dpu_driver, struct gs201_dpu, drm);
-+	if (IS_ERR(dpu))
-+		return PTR_ERR(dpu);
-+	drm = &dpu->drm;
++	return readl_poll_timeout(dpu->dsim + DSIM_FIFOCTRL, val,
++				  (val & mask) == mask, 10, us);
++}
 +
-+	dpu->decon = devm_platform_ioremap_resource_byname(pdev, "main");
-+	if (IS_ERR(dpu->decon))
-+		return PTR_ERR(dpu->decon);
-+	dpu->win = devm_platform_ioremap_resource_byname(pdev, "win");
-+	if (IS_ERR(dpu->win))
-+		return PTR_ERR(dpu->win);
-+	dpu->wincon = devm_platform_ioremap_resource_byname(pdev, "wincon");
-+	if (IS_ERR(dpu->wincon))
-+		return PTR_ERR(dpu->wincon);
-+	dma_base = devm_platform_ioremap_resource_byname(pdev, "dma");
-+	if (IS_ERR(dma_base))
-+		return PTR_ERR(dma_base);
++/*
++ * Once the panel's TE output has been enabled, the DSIM holds back commands
++ * until the next frame has been sent. Let frames run while that is the case.
++ */
++static int gs201_dsim_wait_sent(struct gs201_dpu *dpu)
++{
++	int ret;
 +
-+	ret = gs201_dpu_adopt(dpu, dev, dma_base);
++	ret = gs201_dsim_fifo_empty(dpu, 20000);
++	if (!ret || !(readl(dpu->dsim + DSIM_LINK_STATUS1) &
++		      DSIM_LINK_STATUS1_CMD_LOCK))
++		return ret ? gs201_dsim_fifo_empty(dpu, DSIM_TIMEOUT_US) : 0;
++
++	gs201_dpu_trigger_get(dpu);
++	ret = gs201_dsim_fifo_empty(dpu, DSIM_TIMEOUT_US);
++	gs201_dpu_trigger_put(dpu);
++
++	return ret;
++}
++
++static ssize_t gs201_dsim_read_response(struct gs201_dpu *dpu,
++					const struct mipi_dsi_msg *msg)
++{
++	u8 *rx = msg->rx_buf;
++	size_t len, i;
++	u32 hdr, val;
++	int ret;
++
++	ret = readl_poll_timeout(dpu->dsim + DSIM_INTSRC, val,
++				 val & (DSIM_INTSRC_RX_DATA_DONE |
++					DSIM_INTSRC_RX_ACK |
++					DSIM_INTSRC_BTA_TOUT),
++				 10, DSIM_TIMEOUT_US);
 +	if (ret)
 +		return ret;
++	if (readl(dpu->dsim + DSIM_FIFOCTRL) & DSIM_FIFOCTRL_EMPTY_RX)
++		return -EIO;
 +
-+	panel = of_parse_phandle(dev->of_node, "panel", 0);
-+	if (panel) {
-+		of_property_read_u32(panel, "width-mm", &dpu->width_mm);
-+		of_property_read_u32(panel, "height-mm", &dpu->height_mm);
-+		of_node_put(panel);
++	hdr = readl(dpu->dsim + DSIM_RXFIFO);
++	switch (hdr & 0x3f) {
++	case MIPI_DSI_RX_ACKNOWLEDGE_AND_ERROR_REPORT:
++		dev_dbg(dpu->drm.dev, "DSI error report %#x\n",
++			(hdr >> 8) & 0xffff);
++		return -EIO;
++	case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_1BYTE:
++	case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_1BYTE:
++		len = 1;
++		break;
++	case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_2BYTE:
++	case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_2BYTE:
++		len = 2;
++		break;
++	case MIPI_DSI_RX_DCS_LONG_READ_RESPONSE:
++	case MIPI_DSI_RX_GENERIC_LONG_READ_RESPONSE:
++		len = (hdr >> 8) & 0xffff;
++		for (i = 0; i < len; i += 4) {
++			val = readl(dpu->dsim + DSIM_RXFIFO);
++			if (i < msg->rx_len)
++				memcpy(rx + i, &val,
++				       min_t(size_t, 4, msg->rx_len - i));
++		}
++		return min(len, msg->rx_len);
++	default:
++		return -EPROTO;
 +	}
 +
-+	/* The DMA reads physical addresses (its SysMMU is left in bypass). */
-+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	for (i = 0; i < min(len, msg->rx_len); i++)
++		rx[i] = hdr >> (8 * (i + 1));
++
++	return min(len, msg->rx_len);
++}
++
++static ssize_t gs201_dsi_transfer(struct mipi_dsi_host *host,
++				  const struct mipi_dsi_msg *msg)
++{
++	struct gs201_dpu *dpu = container_of(host, struct gs201_dpu, dsi_host);
++	bool read = mipi_dsi_packet_format_is_short(msg->type) &&
++		    msg->rx_len && msg->rx_buf;
++	bool lpm = msg->flags & MIPI_DSI_MSG_USE_LPM;
++	struct mipi_dsi_packet pkt;
++	u32 esc, word;
++	ssize_t ret;
++	size_t i;
++
++	ret = mipi_dsi_create_packet(&pkt, msg);
 +	if (ret)
 +		return ret;
++
++	mutex_lock(&dpu->dsi_lock);
++
++	esc = readl(dpu->dsim + DSIM_ESCMODE);
++	if (lpm)
++		writel(esc | DSIM_ESCMODE_CMD_LPDT, dpu->dsim + DSIM_ESCMODE);
++
++	if (read) {
++		while (!(readl(dpu->dsim + DSIM_FIFOCTRL) & DSIM_FIFOCTRL_EMPTY_RX))
++			readl(dpu->dsim + DSIM_RXFIFO);
++		writel(DSIM_INTSRC_RX_DATA_DONE | DSIM_INTSRC_RX_ACK |
++		       DSIM_INTSRC_BTA_TOUT, dpu->dsim + DSIM_INTSRC);
++		writel(MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE |
++		       (min_t(size_t, msg->rx_len, 0xffff) << 8),
++		       dpu->dsim + DSIM_PKTHDR);
++	}
++
++	/* The FIFOs take one entry per 32-bit write. */
++	for (i = 0; i < pkt.payload_length; i += 4) {
++		word = 0;
++		memcpy(&word, pkt.payload + i,
++		       min_t(size_t, 4, pkt.payload_length - i));
++		writel(word, dpu->dsim + DSIM_PAYLOAD);
++	}
++	writel(pkt.header[0] | pkt.header[1] << 8 | pkt.header[2] << 16 |
++	       (read ? DSIM_PKTHDR_BTA : 0), dpu->dsim + DSIM_PKTHDR);
++
++	ret = gs201_dsim_wait_sent(dpu);
++	if (!ret)
++		ret = read ? gs201_dsim_read_response(dpu, msg) : msg->tx_len;
++
++	if (lpm)
++		writel(esc, dpu->dsim + DSIM_ESCMODE);
++
++	mutex_unlock(&dpu->dsi_lock);
++
++	if (ret < 0)
++		dev_err_ratelimited(dpu->drm.dev,
++				    "DSI transfer of type %#x failed: %zd\n",
++				    msg->type, ret);
++	return ret;
++}
++
++static int gs201_dpu_bind(struct gs201_dpu *dpu)
++{
++	u32 formats[ARRAY_SIZE(gs201_dpu_formats)];
++	struct drm_device *drm = &dpu->drm;
++	struct device *dev = drm->dev;
++	unsigned int i;
++	int ret;
 +
 +	ret = drmm_mode_config_init(drm);
 +	if (ret)
@@ -3947,7 +4072,7 @@ index 000000000..c2f1ae440
 +	drm_crtc_helper_add(&dpu->crtc, &gs201_dpu_crtc_helper_funcs);
 +
 +	ret = drmm_encoder_init(drm, &dpu->encoder, NULL, DRM_MODE_ENCODER_DSI,
-+			       NULL);
++				NULL);
 +	if (ret)
 +		return ret;
 +	dpu->encoder.possible_crtcs = drm_crtc_mask(&dpu->crtc);
@@ -3977,10 +4102,8 @@ index 000000000..c2f1ae440
 +	writel(~0, dpu->decon + DECON_INT_PEND);
 +	gs201_dpu_set_trigger(dpu, false);
 +
-+	irq = platform_get_irq_byname(pdev, "frame_start");
-+	if (irq < 0)
-+		return irq;
-+	ret = devm_request_irq(dev, irq, gs201_dpu_irq, 0, dev_name(dev), dpu);
++	ret = devm_request_irq(dev, dpu->irq, gs201_dpu_irq, 0, dev_name(dev),
++			       dpu);
 +	if (ret)
 +		return ret;
 +
@@ -3988,28 +4111,120 @@ index 000000000..c2f1ae440
 +	if (ret)
 +		return ret;
 +
-+	platform_set_drvdata(pdev, drm);
-+
 +	ret = drm_dev_register(drm, 0);
 +	if (ret)
 +		return ret;
++	dpu->registered = true;
 +
 +	drm_client_setup(drm, NULL);
 +
 +	return 0;
 +}
 +
++static int gs201_dsi_attach(struct mipi_dsi_host *host,
++			    struct mipi_dsi_device *dsi)
++{
++	struct gs201_dpu *dpu = container_of(host, struct gs201_dpu, dsi_host);
++	struct drm_panel *panel;
++
++	if (dpu->panel)
++		return -EBUSY;
++
++	panel = of_drm_find_panel(dsi->dev.of_node);
++	if (IS_ERR(panel))
++		return PTR_ERR(panel);
++	dpu->panel = panel;
++
++	return gs201_dpu_bind(dpu);
++}
++
++static int gs201_dsi_detach(struct mipi_dsi_host *host,
++			    struct mipi_dsi_device *dsi)
++{
++	struct gs201_dpu *dpu = container_of(host, struct gs201_dpu, dsi_host);
++
++	if (dpu->registered) {
++		drm_dev_unplug(&dpu->drm);
++		drm_atomic_helper_shutdown(&dpu->drm);
++		dpu->registered = false;
++	}
++
++	return 0;
++}
++
++static const struct mipi_dsi_host_ops gs201_dsi_host_ops = {
++	.attach = gs201_dsi_attach,
++	.detach = gs201_dsi_detach,
++	.transfer = gs201_dsi_transfer,
++};
++
++static int gs201_dpu_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct gs201_dpu *dpu;
++	void __iomem *dma_base;
++	int ret;
++
++	dpu = devm_drm_dev_alloc(dev, &gs201_dpu_driver, struct gs201_dpu, drm);
++	if (IS_ERR(dpu))
++		return PTR_ERR(dpu);
++
++	ret = devm_mutex_init(dev, &dpu->dsi_lock);
++	if (ret)
++		return ret;
++	spin_lock_init(&dpu->trig_lock);
++
++	dpu->decon = devm_platform_ioremap_resource_byname(pdev, "main");
++	if (IS_ERR(dpu->decon))
++		return PTR_ERR(dpu->decon);
++	dpu->win = devm_platform_ioremap_resource_byname(pdev, "win");
++	if (IS_ERR(dpu->win))
++		return PTR_ERR(dpu->win);
++	dpu->wincon = devm_platform_ioremap_resource_byname(pdev, "wincon");
++	if (IS_ERR(dpu->wincon))
++		return PTR_ERR(dpu->wincon);
++	dma_base = devm_platform_ioremap_resource_byname(pdev, "dma");
++	if (IS_ERR(dma_base))
++		return PTR_ERR(dma_base);
++	dpu->dsim = devm_platform_ioremap_resource_byname(pdev, "dsim");
++	if (IS_ERR(dpu->dsim))
++		return PTR_ERR(dpu->dsim);
++
++	dpu->irq = platform_get_irq_byname(pdev, "frame_start");
++	if (dpu->irq < 0)
++		return dpu->irq;
++
++	ret = gs201_dpu_adopt(dpu, dev, dma_base);
++	if (ret)
++		return ret;
++
++	/* The DMA reads physical addresses (its SysMMU is left in bypass). */
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, dpu);
++
++	/* The DRM device is registered once the panel attaches. */
++	dpu->dsi_host.dev = dev;
++	dpu->dsi_host.ops = &gs201_dsi_host_ops;
++
++	return mipi_dsi_host_register(&dpu->dsi_host);
++}
++
 +static void gs201_dpu_remove(struct platform_device *pdev)
 +{
-+	struct drm_device *drm = platform_get_drvdata(pdev);
++	struct gs201_dpu *dpu = platform_get_drvdata(pdev);
 +
-+	drm_dev_unplug(drm);
-+	drm_atomic_helper_shutdown(drm);
++	mipi_dsi_host_unregister(&dpu->dsi_host);
 +}
 +
 +static void gs201_dpu_shutdown(struct platform_device *pdev)
 +{
-+	drm_atomic_helper_shutdown(platform_get_drvdata(pdev));
++	struct gs201_dpu *dpu = platform_get_drvdata(pdev);
++
++	if (dpu->registered)
++		drm_atomic_helper_shutdown(&dpu->drm);
 +}
 +
 +static const struct of_device_id gs201_dpu_of_match[] = {
@@ -4030,6 +4245,339 @@ index 000000000..c2f1ae440
 +module_platform_driver(gs201_dpu_platform_driver);
 +
 +MODULE_DESCRIPTION("Google gs201 display controller driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index cbdf7b8f7..560d40994 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -1008,6 +1008,17 @@ config DRM_PANEL_SAMSUNG_S6E3FC2X01
+ 
+ 	    Samsung AMS641RW (found in the OnePlus 6T smartphone)
+ 
++config DRM_PANEL_SAMSUNG_S6E3FC3
++	tristate "Samsung S6E3FC3 DSI command mode panel"
++	depends on GPIOLIB
++	depends on OF
++	depends on DRM_MIPI_DSI
++	depends on BACKLIGHT_CLASS_DEVICE
++	help
++	  Say Y or M here if you want to enable support for the Samsung
++	  S6E3FC3 DDIC with the P10 AMOLED panel (Google Pixel 7), a
++	  1080x2400 DSC compressed command mode panel.
++
+ config DRM_PANEL_SAMSUNG_S6E3HA2
+ 	tristate "Samsung S6E3HA2 DSI video mode panel"
+ 	depends on OF
+diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
+index 3b523cf37..324daae32 100644
+--- a/drivers/gpu/drm/panel/Makefile
++++ b/drivers/gpu/drm/panel/Makefile
+@@ -97,6 +97,7 @@ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6D27A1) += panel-samsung-s6d27a1.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6D7AA0) += panel-samsung-s6d7aa0.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E3FA7) += panel-samsung-s6e3fa7.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E3FC2X01) += panel-samsung-s6e3fc2x01.o
++obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E3FC3) += panel-samsung-s6e3fc3.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E3HA2) += panel-samsung-s6e3ha2.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8) += panel-samsung-s6e3ha8.o
+ obj-$(CONFIG_DRM_PANEL_SAMSUNG_S6E63J0X03) += panel-samsung-s6e63j0x03.o
+diff --git a/drivers/gpu/drm/panel/panel-samsung-s6e3fc3.c b/drivers/gpu/drm/panel/panel-samsung-s6e3fc3.c
+new file mode 100644
+index 000000000..c46dbf9a6
+--- /dev/null
++++ b/drivers/gpu/drm/panel/panel-samsung-s6e3fc3.c
+@@ -0,0 +1,293 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Samsung S6E3FC3 DDIC with the P10 AMOLED panel (Google Pixel 7).
++ *
++ * Command mode, DSC compressed, 1080x2400 at 60 Hz. The sequences follow
++ * Google's downstream panel-samsung-s6e3fc3-p10 driver.
++ */
++
++#include <linux/backlight.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/module.h>
++#include <linux/of.h>
++
++#include <video/mipi_display.h>
++
++#include <drm/display/drm_dsc.h>
++#include <drm/drm_mipi_dsi.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_probe_helper.h>
++
++#define S6E3FC3_MAX_BRIGHTNESS		4095
++#define S6E3FC3_DEFAULT_BRIGHTNESS	1023
++
++/* MIPI_DCS_WRITE_CONTROL_DISPLAY: brightness control block on */
++#define S6E3FC3_WRCTRLD_BCTRL		0x20
++
++static const u8 s6e3fc3_p10_pps[sizeof(struct drm_dsc_picture_parameter_set)] = {
++	0x11, 0x00, 0x00, 0x89, 0x30, 0x80, 0x09, 0x60,
++	0x04, 0x38, 0x00, 0x30, 0x02, 0x1c, 0x02, 0x1c,
++	0x02, 0x00, 0x02, 0x0e, 0x00, 0x20, 0x04, 0xa6,
++	0x00, 0x07, 0x00, 0x0c, 0x02, 0x0b, 0x02, 0x1f,
++	0x18, 0x00, 0x10, 0xf0, 0x03, 0x0c, 0x20, 0x00,
++	0x06, 0x0b, 0x0b, 0x33, 0x0e, 0x1c, 0x2a, 0x38,
++	0x46, 0x54, 0x62, 0x69, 0x70, 0x77, 0x79, 0x7b,
++	0x7d, 0x7e, 0x01, 0x02, 0x01, 0x00, 0x09, 0x40,
++	0x09, 0xbe, 0x19, 0xfc, 0x19, 0xfa, 0x19, 0xf8,
++	0x1a, 0x38, 0x1a, 0x78, 0x1a, 0xb6, 0x2a, 0xf6,
++	0x2b, 0x34, 0x2b, 0x74, 0x3b, 0x74, 0x6b, 0xf4,
++};
++
++struct s6e3fc3 {
++	struct drm_panel panel;
++	struct mipi_dsi_device *dsi;
++	struct gpio_desc *reset_gpio;
++};
++
++static inline struct s6e3fc3 *to_s6e3fc3(struct drm_panel *panel)
++{
++	return container_of(panel, struct s6e3fc3, panel);
++}
++
++#define s6e3fc3_test_key_on(ctx) \
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xf0, 0x5a, 0x5a)
++#define s6e3fc3_test_key_off(ctx) \
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xf0, 0xa5, 0xa5)
++
++static void s6e3fc3_reset(struct s6e3fc3 *ctx)
++{
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(5000, 6000);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	usleep_range(5000, 6000);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(10000, 11000);
++}
++
++static int s6e3fc3_on(struct s6e3fc3 *ctx)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++	struct drm_dsc_picture_parameter_set pps;
++
++	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
++	mipi_dsi_msleep(&dsi_ctx, 120);
++	mipi_dsi_dcs_set_tear_on_multi(&dsi_ctx, MIPI_DSI_DCS_TEAR_MODE_VBLANK);
++	mipi_dsi_dcs_set_column_address_multi(&dsi_ctx, 0, 1080 - 1);
++	mipi_dsi_dcs_set_page_address_multi(&dsi_ctx, 0, 2400 - 1);
++
++	s6e3fc3_test_key_on(&dsi_ctx);
++	/* TE width */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb9, 0x01, 0x09, 0x5c, 0x00, 0x0b);
++	/* FQ CON */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0x27, 0xf2);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf2, 0x00);
++	/* HW, V-total */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0x0e, 0xf2);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf2, 0x04, 0xd4);
++	/* Source change */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0x4c, 0xf6);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf6, 0x48, 0x21);
++	/* LTPS change */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0x88, 0xcb);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xcb, 0x2d, 0x22);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0x8e, 0xcb);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xcb, 0x2d, 0x22);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0xa6, 0xcb);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xcb, 0x05, 0x18, 0x22, 0x21);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0xbf, 0xcb);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xcb, 0x09, 0x28);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0xc5, 0xcb);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xcb, 0x09, 0x28);
++	/* EM off setting */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xb0, 0xdf, 0x66);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x66, 0x71);
++	/* Frequency update */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf7, 0x0f);
++	s6e3fc3_test_key_off(&dsi_ctx);
++
++	/* 60 Hz */
++	s6e3fc3_test_key_on(&dsi_ctx);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x60, 0x00);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xf7, 0x0f);
++	s6e3fc3_test_key_off(&dsi_ctx);
++
++	mipi_dsi_compression_mode_multi(&dsi_ctx, true);
++	memcpy(&pps, s6e3fc3_p10_pps, sizeof(pps));
++	mipi_dsi_picture_parameter_set_multi(&dsi_ctx, &pps);
++	/* PPS_MIC_OFF, PPS_DSC_EN */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xc2, 0x14);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x9d, 0x01);
++
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY,
++				     S6E3FC3_WRCTRLD_BCTRL);
++
++	return dsi_ctx.accum_err;
++}
++
++static int s6e3fc3_prepare(struct drm_panel *panel)
++{
++	struct s6e3fc3 *ctx = to_s6e3fc3(panel);
++	int ret;
++
++	s6e3fc3_reset(ctx);
++
++	ret = s6e3fc3_on(ctx);
++	if (ret < 0) {
++		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int s6e3fc3_enable(struct drm_panel *panel)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = to_s6e3fc3(panel)->dsi };
++
++	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
++
++	return dsi_ctx.accum_err;
++}
++
++static int s6e3fc3_disable(struct drm_panel *panel)
++{
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = to_s6e3fc3(panel)->dsi };
++
++	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
++
++	return dsi_ctx.accum_err;
++}
++
++static int s6e3fc3_unprepare(struct drm_panel *panel)
++{
++	struct s6e3fc3 *ctx = to_s6e3fc3(panel);
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++
++	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
++	mipi_dsi_msleep(&dsi_ctx, 120);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++
++	return 0;
++}
++
++static const struct drm_display_mode s6e3fc3_p10_mode = {
++	.clock = (1080 + 32 + 12 + 26) * (2400 + 12 + 4 + 26) * 60 / 1000,
++	.hdisplay = 1080,
++	.hsync_start = 1080 + 32,
++	.hsync_end = 1080 + 32 + 12,
++	.htotal = 1080 + 32 + 12 + 26,
++	.vdisplay = 2400,
++	.vsync_start = 2400 + 12,
++	.vsync_end = 2400 + 12 + 4,
++	.vtotal = 2400 + 12 + 4 + 26,
++	.width_mm = 66,
++	.height_mm = 146,
++	.type = DRM_MODE_TYPE_DRIVER,
++};
++
++static int s6e3fc3_get_modes(struct drm_panel *panel,
++			     struct drm_connector *connector)
++{
++	return drm_connector_helper_get_modes_fixed(connector,
++						    &s6e3fc3_p10_mode);
++}
++
++static const struct drm_panel_funcs s6e3fc3_panel_funcs = {
++	.prepare = s6e3fc3_prepare,
++	.enable = s6e3fc3_enable,
++	.disable = s6e3fc3_disable,
++	.unprepare = s6e3fc3_unprepare,
++	.get_modes = s6e3fc3_get_modes,
++};
++
++static int s6e3fc3_bl_update_status(struct backlight_device *bl)
++{
++	struct mipi_dsi_device *dsi = bl_get_data(bl);
++
++	return mipi_dsi_dcs_set_display_brightness_large(dsi,
++					backlight_get_brightness(bl));
++}
++
++static const struct backlight_ops s6e3fc3_bl_ops = {
++	.update_status = s6e3fc3_bl_update_status,
++};
++
++static int s6e3fc3_probe(struct mipi_dsi_device *dsi)
++{
++	const struct backlight_properties props = {
++		.type = BACKLIGHT_RAW,
++		.brightness = S6E3FC3_DEFAULT_BRIGHTNESS,
++		.max_brightness = S6E3FC3_MAX_BRIGHTNESS,
++	};
++	struct device *dev = &dsi->dev;
++	struct s6e3fc3 *ctx;
++	int ret;
++
++	ctx = devm_drm_panel_alloc(dev, struct s6e3fc3, panel,
++				   &s6e3fc3_panel_funcs,
++				   DRM_MODE_CONNECTOR_DSI);
++	if (IS_ERR(ctx))
++		return PTR_ERR(ctx);
++
++	/* Deasserted: keeps the panel running as set up by the bootloader. */
++	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
++	if (IS_ERR(ctx->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
++				     "failed to get reset GPIO\n");
++
++	ctx->dsi = dsi;
++	mipi_dsi_set_drvdata(dsi, ctx);
++
++	dsi->lanes = 4;
++	dsi->format = MIPI_DSI_FMT_RGB888;
++	dsi->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS;
++
++	ctx->panel.prepare_prev_first = true;
++	ctx->panel.backlight = devm_backlight_device_register(dev, dev_name(dev),
++							      dev, dsi,
++							      &s6e3fc3_bl_ops,
++							      &props);
++	if (IS_ERR(ctx->panel.backlight))
++		return dev_err_probe(dev, PTR_ERR(ctx->panel.backlight),
++				     "failed to register backlight\n");
++
++	drm_panel_add(&ctx->panel);
++
++	ret = mipi_dsi_attach(dsi);
++	if (ret < 0) {
++		drm_panel_remove(&ctx->panel);
++		return dev_err_probe(dev, ret, "failed to attach to DSI host\n");
++	}
++
++	return 0;
++}
++
++static void s6e3fc3_remove(struct mipi_dsi_device *dsi)
++{
++	struct s6e3fc3 *ctx = mipi_dsi_get_drvdata(dsi);
++
++	mipi_dsi_detach(dsi);
++	drm_panel_remove(&ctx->panel);
++}
++
++static const struct of_device_id s6e3fc3_of_match[] = {
++	{ .compatible = "samsung,s6e3fc3-p10" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, s6e3fc3_of_match);
++
++static struct mipi_dsi_driver s6e3fc3_driver = {
++	.probe = s6e3fc3_probe,
++	.remove = s6e3fc3_remove,
++	.driver = {
++		.name = "panel-samsung-s6e3fc3",
++		.of_match_table = s6e3fc3_of_match,
++	},
++};
++module_mipi_dsi_driver(s6e3fc3_driver);
++
++MODULE_DESCRIPTION("DRM driver for the Samsung S6E3FC3 P10 panel");
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/gpu/drm/panthor/panthor_drv.c b/drivers/gpu/drm/panthor/panthor_drv.c
 index 46a3080b0..1978067c4 100644
