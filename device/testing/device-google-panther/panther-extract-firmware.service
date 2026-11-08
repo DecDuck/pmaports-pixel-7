@@ -1,8 +1,7 @@
 [Unit]
-Description=Extract Pixel 7 firmware from the Android vendor partition
+Description=Extract Pixel 7 Wi-Fi/Bluetooth firmware from the Android vendor partition
 After=local-fs.target
 Before=bluetooth.service
-ConditionPathExists=!/lib/firmware/updates/brcm/BCM4389C1.google,gs201-panther.hcd
 
 [Service]
 Type=oneshot

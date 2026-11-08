@@ -16,6 +16,9 @@ DEST = "/lib/firmware/updates"
 # (path in vendor partition, path relative to DEST)
 FILES = [
     ("firmware/brcm/BCM.hcd", "brcm/BCM4389C1.google,gs201-panther.hcd"),
+    ("firmware/fw_bcmdhd.bin", "brcm/brcmfmac4389c1-pcie.bin"),
+    ("firmware/bcmdhd.cal", "brcm/brcmfmac4389c1-pcie.txt"),
+    ("firmware/bcmdhd_clm.blob", "brcm/brcmfmac4389c1-pcie.clm_blob"),
 ]
 
 LP_GEOMETRY_MAGIC = 0x616C4467
@@ -143,6 +146,25 @@ def rebind_bluetooth():
                 f.write(dev)
 
 
+def reprobe_wifi():
+    # brcmfmac fails to probe without firmware; ask the PCI core to retry
+    pci = "/sys/bus/pci/devices"
+    for dev in os.listdir(pci):
+        try:
+            with open(f"{pci}/{dev}/vendor") as f:
+                if f.read().strip() != "0x14e4":
+                    continue
+        except OSError:
+            continue
+        if os.path.exists(f"{pci}/{dev}/driver"):
+            continue
+        try:
+            with open("/sys/bus/pci/drivers_probe", "w") as f:
+                f.write(dev)
+        except OSError as e:
+            log(f"{dev}: reprobe failed: {e}")
+
+
 def main():
     if all(os.path.isfile(os.path.join(DEST, d)) for _, d in FILES):
         return 0
@@ -160,6 +182,7 @@ def main():
         try:
             if extract_from(name, parts[name], superdev) == len(FILES):
                 rebind_bluetooth()
+                reprobe_wifi()
                 return 0
         except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
             log(f"{name}: {e}")
