@@ -2713,10 +2713,34 @@ index 000000000..8063a5fd2
 +	};
 +};
 diff --git a/drivers/bluetooth/btbcm.c b/drivers/bluetooth/btbcm.c
-index 463d59890..d267d869f 100644
+index 463d59890..a61c07554 100644
 --- a/drivers/bluetooth/btbcm.c
 +++ b/drivers/bluetooth/btbcm.c
-@@ -208,7 +208,28 @@ int btbcm_write_pcm_int_params(struct hci_dev *hdev,
+@@ -162,6 +162,23 @@ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+ }
+ EXPORT_SYMBOL_GPL(btbcm_set_bdaddr);
+ 
++#define BCM_SET_ACL_PRIORITY		0xfc57
++#define BCM_ACL_PRIORITY_NORMAL		0x00
++#define BCM_ACL_PRIORITY_HIGH		0xff
++
++/* Vendor command used by Android's stack for A2DP streams */
++int btbcm_set_acl_priority(struct hci_dev *hdev, u16 handle, bool high)
++{
++	u8 param[3];
++
++	put_unaligned_le16(handle, param);
++	param[2] = high ? BCM_ACL_PRIORITY_HIGH : BCM_ACL_PRIORITY_NORMAL;
++
++	return __hci_cmd_sync_status(hdev, BCM_SET_ACL_PRIORITY, sizeof(param),
++				     param, HCI_CMD_TIMEOUT);
++}
++EXPORT_SYMBOL_GPL(btbcm_set_acl_priority);
++
+ int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params)
+ {
+@@ -208,7 +225,28 @@ int btbcm_write_pcm_int_params(struct hci_dev *hdev,
  }
  EXPORT_SYMBOL_GPL(btbcm_write_pcm_int_params);
  
@@ -2746,7 +2770,7 @@ index 463d59890..d267d869f 100644
  {
  	const struct hci_command_hdr *cmd;
  	const u8 *fw_ptr;
-@@ -251,6 +272,21 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
+@@ -251,6 +289,21 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
  
  		opcode = le16_to_cpu(cmd->opcode);
  
@@ -2768,7 +2792,7 @@ index 463d59890..d267d869f 100644
  		skb = __hci_cmd_sync(hdev, opcode, cmd->plen, cmd_param,
  				     HCI_INIT_TIMEOUT);
  		if (IS_ERR(skb)) {
-@@ -267,6 +303,11 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
+@@ -267,6 +320,11 @@ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw)
  
  	return 0;
  }
@@ -2780,7 +2804,7 @@ index 463d59890..d267d869f 100644
  EXPORT_SYMBOL(btbcm_patchram);
  
  static int btbcm_reset(struct hci_dev *hdev)
-@@ -514,6 +555,7 @@ static const struct bcm_subver_table bcm_uart_subver_table[] = {
+@@ -514,6 +572,7 @@ static const struct bcm_subver_table bcm_uart_subver_table[] = {
  	{ 0x4106, "BCM4335A0"	},	/* 002.001.006 */
  	{ 0x410c, "BCM43430B0"	},	/* 002.001.012 */
  	{ 0x2119, "BCM4373A0"	},	/* 001.001.025 */
@@ -2788,7 +2812,7 @@ index 463d59890..d267d869f 100644
  	{ }
  };
  
-@@ -678,7 +720,8 @@ int btbcm_initialize(struct hci_dev *hdev, bool *fw_load_done, bool use_autobaud
+@@ -678,7 +737,8 @@ int btbcm_initialize(struct hci_dev *hdev, bool *fw_load_done, bool use_autobaud
  	}
  
  	if (*fw_load_done) {
@@ -2798,11 +2822,56 @@ index 463d59890..d267d869f 100644
  		if (err)
  			bt_dev_info(hdev, "BCM: Patch failed (%d)", err);
  
+diff --git a/drivers/bluetooth/btbcm.h b/drivers/bluetooth/btbcm.h
+index b4cb24231..c2dfdd6fe 100644
+--- a/drivers/bluetooth/btbcm.h
++++ b/drivers/bluetooth/btbcm.h
+@@ -53,6 +53,7 @@ struct bcm_set_pcm_format_params {
+ 
+ int btbcm_check_bdaddr(struct hci_dev *hdev);
+ int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr);
++int btbcm_set_acl_priority(struct hci_dev *hdev, u16 handle, bool high);
+ int btbcm_patchram(struct hci_dev *hdev, const struct firmware *fw);
+ int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params);
+@@ -77,6 +78,12 @@ static inline int btbcm_set_bdaddr(struct hci_dev *hdev, const bdaddr_t *bdaddr)
+ 	return -EOPNOTSUPP;
+ }
+ 
++static inline int btbcm_set_acl_priority(struct hci_dev *hdev, u16 handle,
++					 bool high)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline int btbcm_read_pcm_int_params(struct hci_dev *hdev,
+ 			      struct bcm_set_pcm_int_params *params)
+ {
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+index dc7191bf4..f920d9423 100644
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -4342,6 +4342,7 @@ static int btusb_probe(struct usb_interface *intf,
+ 		hdev->setup = btbcm_setup_patchram;
+ 		hdev->set_diag = btusb_bcm_set_diag;
+ 		hdev->set_bdaddr = btbcm_set_bdaddr;
++		hdev->set_acl_priority = btbcm_set_acl_priority;
+ 
+ 		/* Broadcom LM_DIAG Interface numbers are hardcoded */
+ 		data->diag = usb_ifnum_to_if(data->udev, ifnum_base + 2);
 diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
-index 9a103db7e..facbe96c3 100644
+index 9a103db7e..7e8376863 100644
 --- a/drivers/bluetooth/hci_bcm.c
 +++ b/drivers/bluetooth/hci_bcm.c
-@@ -1591,6 +1591,7 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
+@@ -590,6 +590,7 @@ static int bcm_setup(struct hci_uart *hu)
+ 
+ 	hu->hdev->set_diag = bcm_set_diag;
+ 	hu->hdev->set_bdaddr = btbcm_set_bdaddr;
++	hu->hdev->set_acl_priority = btbcm_set_acl_priority;
+ 
+ 	err = btbcm_initialize(hu->hdev, &fw_load_done, use_autobaud_mode);
+ 	if (err)
+@@ -1591,6 +1592,7 @@ static const struct of_device_id bcm_bluetooth_of_match[] = {
  	{ .compatible = "brcm,bcm43430a1-bt" },
  	{ .compatible = "brcm,bcm43438-bt", .data = &bcm43438_device_data },
  	{ .compatible = "brcm,bcm4349-bt", .data = &bcm43438_device_data },
@@ -11674,3 +11743,192 @@ index 000000000..2cc25c3bc
 + */
 +
 +#endif /* __LINUX_MFD_S2MPG12_H */
+diff --git a/include/net/bluetooth/hci_core.h b/include/net/bluetooth/hci_core.h
+index fa2a36773..317a7b38a 100644
+--- a/include/net/bluetooth/hci_core.h
++++ b/include/net/bluetooth/hci_core.h
+@@ -657,6 +657,8 @@ struct hci_dev {
+ 	void (*reset)(struct hci_dev *hdev);
+ 	bool (*wakeup)(struct hci_dev *hdev);
+ 	int (*set_quality_report)(struct hci_dev *hdev, bool enable);
++	/* Make the controller schedule this ACL link ahead of others/scans */
++	int (*set_acl_priority)(struct hci_dev *hdev, u16 handle, bool high);
+ 	int (*get_data_path_id)(struct hci_dev *hdev, __u8 *data_path);
+ 	int (*get_codec_config_data)(struct hci_dev *hdev, __u8 type,
+ 				     struct bt_codec *codec, __u8 *vnd_len,
+@@ -771,6 +773,8 @@ struct hci_conn {
+ 	struct delayed_work auto_accept_work;
+ 	struct delayed_work idle_work;
+ 	struct delayed_work le_conn_timeout;
++	struct delayed_work acl_prio_work;
++	unsigned long	acl_prio_last;
+ 
+ 	struct device	dev;
+ 	struct dentry	*debugfs;
+@@ -1012,6 +1016,8 @@ enum {
+ 	HCI_CONN_CREATE_PA_SYNC,
+ 	HCI_CONN_PA_SYNC,
+ 	HCI_CONN_PA_SYNC_FAILED,
++	HCI_CONN_ACL_PRIO_WANT,
++	HCI_CONN_ACL_PRIO_SET,
+ };
+ 
+ static inline bool hci_conn_ssp_enabled(struct hci_conn *conn)
+@@ -2260,6 +2266,9 @@ static inline void hci_key_change_cfm(struct hci_conn *conn, __u8 status)
+ 	mutex_unlock(&hci_cb_list_lock);
+ }
+ 
++void hci_conn_acl_prio_tx(struct hci_conn *conn, struct sk_buff *skb);
++void hci_conn_acl_prio_reapply(struct hci_conn *conn);
++
+ static inline void hci_role_switch_cfm(struct hci_conn *conn, __u8 status,
+ 								__u8 role)
+ {
+diff --git a/net/bluetooth/hci_conn.c b/net/bluetooth/hci_conn.c
+index cf44452e0..46b631f1f 100644
+--- a/net/bluetooth/hci_conn.c
++++ b/net/bluetooth/hci_conn.c
+@@ -696,6 +696,99 @@ static void hci_conn_idle(struct work_struct *work)
+ 	}
+ }
+ 
++/*
++ * Controller-side ACL priority: while a link carries traffic sent at the
++ * highest unprivileged socket priority (e.g. A2DP media, which PipeWire sends
++ * at priority 6), ask the controller to schedule it ahead of other links and
++ * of inquiry/scanning, as Android does for audio streams. The priority is
++ * dropped again once that traffic has stopped for a while.
++ */
++#define HCI_ACL_PRIO_SKB	(HCI_PRIO_MAX - 1)
++#define HCI_ACL_PRIO_IDLE	msecs_to_jiffies(2000)
++
++struct hci_acl_prio_cmd {
++	u16 handle;
++	bool high;
++};
++
++static int hci_acl_prio_sync(struct hci_dev *hdev, void *data)
++{
++	struct hci_acl_prio_cmd *cmd = data;
++	int err;
++
++	err = hdev->set_acl_priority(hdev, cmd->handle, cmd->high);
++	if (err)
++		bt_dev_warn_ratelimited(hdev, "set ACL 0x%4.4x priority %s: %d",
++					cmd->handle, cmd->high ? "high" : "normal",
++					err);
++	else
++		bt_dev_dbg(hdev, "ACL 0x%4.4x priority %s", cmd->handle,
++			   cmd->high ? "high" : "normal");
++
++	return err;
++}
++
++static void hci_acl_prio_destroy(struct hci_dev *hdev, void *data, int err)
++{
++	kfree(data);
++}
++
++static void hci_acl_prio_send(struct hci_conn *conn, bool high)
++{
++	struct hci_acl_prio_cmd *cmd;
++
++	cmd = kmalloc(sizeof(*cmd), GFP_KERNEL);
++	if (!cmd)
++		return;
++
++	cmd->handle = conn->handle;
++	cmd->high = high;
++	if (hci_cmd_sync_queue(conn->hdev, hci_acl_prio_sync, cmd,
++			       hci_acl_prio_destroy))
++		kfree(cmd);
++}
++
++static void hci_conn_acl_prio_work(struct work_struct *work)
++{
++	struct hci_conn *conn = container_of(work, struct hci_conn,
++					     acl_prio_work.work);
++	unsigned long expiry = READ_ONCE(conn->acl_prio_last) +
++			       HCI_ACL_PRIO_IDLE;
++
++	if (test_bit(HCI_CONN_ACL_PRIO_WANT, &conn->flags) &&
++	    time_before(jiffies, expiry)) {
++		if (!test_and_set_bit(HCI_CONN_ACL_PRIO_SET, &conn->flags))
++			hci_acl_prio_send(conn, true);
++		queue_delayed_work(conn->hdev->workqueue, &conn->acl_prio_work,
++				   expiry - jiffies + 1);
++		return;
++	}
++
++	clear_bit(HCI_CONN_ACL_PRIO_WANT, &conn->flags);
++	if (test_and_clear_bit(HCI_CONN_ACL_PRIO_SET, &conn->flags))
++		hci_acl_prio_send(conn, false);
++}
++
++void hci_conn_acl_prio_tx(struct hci_conn *conn, struct sk_buff *skb)
++{
++	if (!conn->hdev->set_acl_priority || conn->type != ACL_LINK ||
++	    skb->priority != HCI_ACL_PRIO_SKB)
++		return;
++
++	WRITE_ONCE(conn->acl_prio_last, jiffies);
++	if (!test_and_set_bit(HCI_CONN_ACL_PRIO_WANT, &conn->flags))
++		queue_delayed_work(conn->hdev->workqueue, &conn->acl_prio_work,
++				   0);
++}
++
++/* The controller drops the link priority on a role switch */
++void hci_conn_acl_prio_reapply(struct hci_conn *conn)
++{
++	if (conn->hdev->set_acl_priority &&
++	    test_bit(HCI_CONN_ACL_PRIO_SET, &conn->flags))
++		hci_acl_prio_send(conn, true);
++}
++
+ static void hci_conn_auto_accept(struct work_struct *work)
+ {
+ 	struct hci_conn *conn = container_of(work, struct hci_conn,
+@@ -1152,6 +1245,7 @@ static struct hci_conn *__hci_conn_add(struct hci_dev *hdev, int type,
+ 	INIT_DELAYED_WORK(&conn->disc_work, hci_conn_timeout);
+ 	INIT_DELAYED_WORK(&conn->auto_accept_work, hci_conn_auto_accept);
+ 	INIT_DELAYED_WORK(&conn->idle_work, hci_conn_idle);
++	INIT_DELAYED_WORK(&conn->acl_prio_work, hci_conn_acl_prio_work);
+ 	INIT_DELAYED_WORK(&conn->le_conn_timeout, le_conn_timeout);
+ 
+ 	spin_lock_init(&conn->proto_lock);
+@@ -1277,6 +1371,7 @@ void hci_conn_del(struct hci_conn *conn)
+ 	disable_delayed_work_sync(&conn->disc_work);
+ 	disable_delayed_work_sync(&conn->auto_accept_work);
+ 	disable_delayed_work_sync(&conn->idle_work);
++	disable_delayed_work_sync(&conn->acl_prio_work);
+ 
+ 	/* Remove the connection from the list so unacked logic can detect when
+ 	 * a certain pool is not being utilized.
+diff --git a/net/bluetooth/hci_core.c b/net/bluetooth/hci_core.c
+index 74d9865e0..fef97ae04 100644
+--- a/net/bluetooth/hci_core.c
++++ b/net/bluetooth/hci_core.c
+@@ -3266,6 +3266,7 @@ void hci_send_acl(struct hci_chan *chan, struct sk_buff *skb, __u16 flags)
+ 
+ 	BT_DBG("%s chan %p flags 0x%4.4x", hdev->name, chan, flags);
+ 
++	hci_conn_acl_prio_tx(chan->conn, skb);
+ 	hci_queue_acl(chan, &chan->data_q, skb, flags);
+ 
+ 	hci_sched_tx(hdev);
+diff --git a/net/bluetooth/hci_event.c b/net/bluetooth/hci_event.c
+index 2f5e21ff9..bee67eff8 100644
+--- a/net/bluetooth/hci_event.c
++++ b/net/bluetooth/hci_event.c
+@@ -4495,8 +4495,10 @@ static void hci_role_change_evt(struct hci_dev *hdev, void *data,
+ 
+ 	conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, &ev->bdaddr);
+ 	if (conn) {
+-		if (!ev->status)
++		if (!ev->status) {
+ 			conn->role = ev->role;
++			hci_conn_acl_prio_reapply(conn);
++		}
+ 
+ 		clear_bit(HCI_CONN_RSWITCH_PEND, &conn->flags);
+ 

@@ -2,7 +2,7 @@
 maintainer=""
 pkgname=device-google-panther
 pkgver=1
-pkgrel=22
+pkgrel=23
 pkgdesc="Google Pixel 7"
 url="https://nura.eco"
 arch="aarch64"
@@ -32,7 +32,7 @@ install="
 	$pkgname-openrc.post-install
 	$pkgname-openrc.post-upgrade
 	"
-subpackages="$pkgname-openrc"
+subpackages="$pkgname-openrc $pkgname-audio"
 options="!archcheck !check"
 
 build() {
@@ -55,6 +55,15 @@ package() {
 
 openrc() {
 	default_openrc
+}
+
+audio() {
+	pkgdesc="Audio configuration for the Google Pixel 7"
+	install_if="$pkgname=$pkgver-r$pkgrel postmarketos-base-ui-audio"
+	# PipeWire marks A2DP media with socket priority 6, which makes the
+	# kernel give the Bluetooth audio link priority in the controller.
+	depends="postmarketos-base-ui-audio-backend-pipewire"
+	mkdir -p "$subpkgdir"
 }
 sha512sums="
 2188d1aaadb83fb731f1bd212b691f31cb9dd3f6048e98854cfb3a6107d0fec6b256a9d1333dba048bf16fc81ad962dfe4f906d5301a75e7474d89e48bd8dc5c  deviceinfo
