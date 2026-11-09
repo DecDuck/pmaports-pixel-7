@@ -130,10 +130,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..a4c8072ee
+index 000000000..f89ef9efe
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,506 @@
+@@ -0,0 +1,525 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -219,13 +219,32 @@ index 000000000..a4c8072ee
 +		no-map;
 +	};
 +
-+	/* Scanout buffers: 10 MiB each at 1080x2400 */
++	/*
++	 * Modem shared memory (downstream cp_rmem*). Wi-Fi rings allocated here
++	 * got corrupted, so the modem writes to it even without a Linux driver.
++	 */
++	cp-rmem@e8000000 {
++		reg = <0x0 0xe8000000 0x2000000>;
++		no-map;
++	};
++
++	cp-rmem@ea400000 {
++		reg = <0x0 0xea400000 0x800000>;
++		no-map;
++	};
++
++	cp-msi@f6200000 {
++		reg = <0x0 0xf6200000 0x1000>;
++		no-map;
++	};
++
++	/* Scanout buffers (10 MiB each at 1080x2400), below 4 GiB for the DPU */
 +	linux,cma {
 +		compatible = "shared-dma-pool";
 +		reusable;
 +		size = <0x10000000>;
 +		alignment = <0x0 0x400000>;
-+		alloc-ranges = <0x0 0x80000000 0x80000000>;
++		alloc-ranges = <0x0 0xc4000000 0x14000000>;
 +		linux,cma-default;
 +	};
 +};
@@ -1094,10 +1113,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..f51d1e5c6
+index 000000000..8063a5fd2
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1567 @@
+@@ -0,0 +1,1595 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -1777,8 +1796,19 @@ index 000000000..f51d1e5c6
 +		#size-cells = <1>;
 +		ranges;
 +
++		/* Carve-outs from the downstream gs201-rmem.dtsi */
++		ect@90000000 {
++			reg = <0x0 0x90000000 0x3a000>;
++			no-map;
++		};
++
 +		gsa@90200000 {
 +			reg = <0x0 0x90200000 0x400000>;
++			no-map;
++		};
++
++		tpu-ctx@91e00000 {
++			reg = <0x0 0x91e00000 0x1200000>;
 +			no-map;
 +		};
 +
@@ -1789,6 +1819,23 @@ index 000000000..f51d1e5c6
 +
 +		aoc@94000000 {
 +			reg = <0x0 0x94000000 0x3000000>;
++			no-map;
++		};
++
++		gxp-fw@98000000 {
++			reg = <0x0 0x98000000 0x500000>;
++			no-map;
++		};
++
++		/* Secure world log buffers (8 CPUs x 64 KiB) */
++		seclog@c3000000 {
++			reg = <0x0 0xc3000000 0x80000>;
++			no-map;
++		};
++
++		/* Debug snapshot logs, also written by hardware scan-to-DRAM */
++		debug-snapshot@d8100000 {
++			reg = <0x0 0xd8100000 0x6000000>;
 +			no-map;
 +		};
 +
@@ -7047,7 +7094,7 @@ index e74a23e11..37d941454 100644
 +
  #endif /* FWIL_TYPES_H_ */
 diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
-index 069ba7016..a0384e423 100644
+index 069ba7016..07cb580fa 100644
 --- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
 +++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
 @@ -11,7 +11,9 @@
@@ -7060,15 +7107,16 @@ index 069ba7016..a0384e423 100644
  #include <brcmu_utils.h>
  #include <brcmu_wifi.h>
  
-@@ -21,6 +23,7 @@
+@@ -21,6 +23,8 @@
  #include "msgbuf.h"
  #include "commonring.h"
  #include "flowring.h"
 +#include "feature.h"
++#include "fwil.h"
  #include "bus.h"
  #include "tracepoint.h"
  
-@@ -47,9 +50,11 @@
+@@ -47,13 +51,16 @@
  #define MSGBUF_TYPE_RX_CMPLT			0x12
  #define MSGBUF_TYPE_LPBK_DMAXFER		0x13
  #define MSGBUF_TYPE_LPBK_DMAXFER_CMPLT		0x14
@@ -7081,7 +7129,12 @@ index 069ba7016..a0384e423 100644
  
  #define BRCMF_IOCTL_REQ_PKTID			0xFFFE
  
-@@ -63,6 +68,9 @@
+ #define BRCMF_MSGBUF_MAX_PKT_SIZE		2048
++#define BRCMF_MSGBUF_MAX_RXBUF_SIZE		4096
+ #define BRCMF_MSGBUF_MAX_CTL_PKT_SIZE           8192
+ #define BRCMF_MSGBUF_RXBUFPOST_THRESHOLD	32
+ #define BRCMF_MSGBUF_MAX_IOCTLRESPBUF_POST	8
+@@ -63,6 +70,9 @@
  #define BRCMF_MSGBUF_PKT_FLAGS_FRAME_802_11	0x02
  #define BRCMF_MSGBUF_PKT_FLAGS_FRAME_MASK	0x07
  #define BRCMF_MSGBUF_PKT_FLAGS_PRIO_SHIFT	5
@@ -7091,7 +7144,7 @@ index 069ba7016..a0384e423 100644
  
  #define BRCMF_MSGBUF_TX_FLUSH_CNT1		32
  #define BRCMF_MSGBUF_TX_FLUSH_CNT2		96
-@@ -218,6 +226,19 @@ struct msgbuf_flowring_flush_resp {
+@@ -218,6 +228,19 @@ struct msgbuf_flowring_flush_resp {
  	__le32				rsvd0[3];
  };
  
@@ -7111,7 +7164,15 @@ index 069ba7016..a0384e423 100644
  struct brcmf_msgbuf_work_item {
  	struct list_head queue;
  	u32 flowid;
-@@ -315,7 +336,6 @@ brcmf_msgbuf_init_pktids(u32 nr_array_entries,
+@@ -238,6 +261,7 @@ struct brcmf_msgbuf {
+ 	u16 max_completionrings;
+ 
+ 	u16 rx_dataoffset;
++	u16 rx_buf_size;
+ 	u32 max_rxbufpost;
+ 	u16 rx_metadata_offset;
+ 	u32 rxbufpost;
+@@ -315,7 +339,6 @@ brcmf_msgbuf_init_pktids(u32 nr_array_entries,
  	return pktids;
  }
  
@@ -7119,7 +7180,7 @@ index 069ba7016..a0384e423 100644
  static int
  brcmf_msgbuf_alloc_pktid(struct device *dev,
  			 struct brcmf_msgbuf_pktids *pktids,
-@@ -718,6 +738,59 @@ static u32 brcmf_msgbuf_flowring_create(struct brcmf_msgbuf *msgbuf, int ifidx,
+@@ -718,6 +741,59 @@ static u32 brcmf_msgbuf_flowring_create(struct brcmf_msgbuf *msgbuf, int ifidx,
  }
  
  
@@ -7179,7 +7240,7 @@ index 069ba7016..a0384e423 100644
  static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
  {
  	struct brcmf_flowring *flow = msgbuf->flow;
-@@ -729,6 +802,9 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
+@@ -729,6 +805,9 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
  	dma_addr_t physaddr;
  	u32 pktid;
  	struct msgbuf_tx_msghdr *tx_msghdr;
@@ -7189,7 +7250,7 @@ index 069ba7016..a0384e423 100644
  	u64 address;
  
  	commonring = msgbuf->flowrings[flowid];
-@@ -746,9 +822,14 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
+@@ -746,9 +825,14 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
  			break;
  		}
  		skb_orphan(skb);
@@ -7205,7 +7266,7 @@ index 069ba7016..a0384e423 100644
  			brcmf_flowring_reinsert(flow, flowid, skb);
  			bphy_err(drvr, "No PKTID available !!\n");
  			break;
-@@ -757,6 +838,8 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
+@@ -757,6 +841,8 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
  		if (!ret_ptr) {
  			brcmf_msgbuf_get_pktid(msgbuf->drvr->bus_if->dev,
  					       msgbuf->tx_pktids, pktid);
@@ -7214,7 +7275,7 @@ index 069ba7016..a0384e423 100644
  			brcmf_flowring_reinsert(flow, flowid, skb);
  			break;
  		}
-@@ -770,9 +853,12 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
+@@ -770,9 +856,12 @@ static void brcmf_msgbuf_txflow(struct brcmf_msgbuf *msgbuf, u16 flowid)
  		tx_msghdr->flags = BRCMF_MSGBUF_PKT_FLAGS_FRAME_802_3;
  		tx_msghdr->flags |= (skb->priority & 0x07) <<
  				    BRCMF_MSGBUF_PKT_FLAGS_PRIO_SHIFT;
@@ -7229,7 +7290,16 @@ index 069ba7016..a0384e423 100644
  		address = (u64)physaddr;
  		tx_msghdr->data_buf_addr.high_addr = cpu_to_le32(address >> 32);
  		tx_msghdr->data_buf_addr.low_addr =
-@@ -914,6 +1000,9 @@ brcmf_msgbuf_process_txstatus(struct brcmf_msgbuf *msgbuf, void *buf)
+@@ -886,7 +975,7 @@ brcmf_msgbuf_process_ioctl_complete(struct brcmf_msgbuf *msgbuf, void *buf)
+ 	msgbuf->ioctl_resp_status =
+ 			(s16)le16_to_cpu(ioctl_resp->compl_hdr.status);
+ 	msgbuf->ioctl_resp_ret_len = le16_to_cpu(ioctl_resp->resp_len);
+-	msgbuf->ioctl_resp_pktid = le32_to_cpu(ioctl_resp->msg.request_id);
++	msgbuf->ioctl_resp_pktid = le32_to_cpu(ioctl_resp->msg.request_id) - 1;
+ 
+ 	brcmf_msgbuf_ioctl_resp_wake(msgbuf);
+ 
+@@ -914,6 +1003,9 @@ brcmf_msgbuf_process_txstatus(struct brcmf_msgbuf *msgbuf, void *buf)
  	if (!skb)
  		return;
  
@@ -7239,7 +7309,54 @@ index 069ba7016..a0384e423 100644
  	if (!brcmf_msgbuf_get_flowid(msgbuf, flow_ring_id, &flowid)) {
  		brcmf_txfinalize(brcmf_get_ifp(msgbuf->drvr, tx_status->msg.ifidx),
  				 skb, false);
-@@ -1319,6 +1408,15 @@ brcmf_msgbuf_process_flow_ring_delete_response(struct brcmf_msgbuf *msgbuf,
+@@ -956,7 +1048,7 @@ static u32 brcmf_msgbuf_rxbuf_data_post(struct brcmf_msgbuf *msgbuf, u32 count)
+ 		rx_bufpost = (struct msgbuf_rx_bufpost *)ret_ptr;
+ 		memset(rx_bufpost, 0, sizeof(*rx_bufpost));
+ 
+-		skb = brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_PKT_SIZE);
++		skb = brcmu_pkt_buf_get_skb(msgbuf->rx_buf_size);
+ 
+ 		if (skb == NULL) {
+ 			bphy_err(drvr, "Failed to alloc SKB\n");
+@@ -988,7 +1080,8 @@ static u32 brcmf_msgbuf_rxbuf_data_post(struct brcmf_msgbuf *msgbuf, u32 count)
+ 			physaddr += msgbuf->rx_metadata_offset;
+ 		}
+ 		rx_bufpost->msg.msgtype = MSGBUF_TYPE_RXBUF_POST;
+-		rx_bufpost->msg.request_id = cpu_to_le32(pktid);
++		/* firmware treats request_id 0 as invalid (traps) */
++		rx_bufpost->msg.request_id = cpu_to_le32(pktid + 1);
+ 
+ 		address = (u64)physaddr;
+ 		rx_bufpost->data_buf_len = cpu_to_le16((u16)pktlen);
+@@ -1088,7 +1181,8 @@ brcmf_msgbuf_rxbuf_ctrl_post(struct brcmf_msgbuf *msgbuf, bool event_buf,
+ 		else
+ 			rx_bufpost->msg.msgtype =
+ 				MSGBUF_TYPE_IOCTLRESP_BUF_POST;
+-		rx_bufpost->msg.request_id = cpu_to_le32(pktid);
++		/* firmware treats request_id 0 as invalid (traps) */
++		rx_bufpost->msg.request_id = cpu_to_le32(pktid + 1);
+ 
+ 		address = (u64)physaddr;
+ 		rx_bufpost->host_buf_len = cpu_to_le16((u16)pktlen);
+@@ -1139,7 +1233,7 @@ static void brcmf_msgbuf_process_event(struct brcmf_msgbuf *msgbuf, void *buf)
+ 	struct brcmf_if *ifp;
+ 
+ 	event = (struct msgbuf_rx_event *)buf;
+-	idx = le32_to_cpu(event->msg.request_id);
++	idx = le32_to_cpu(event->msg.request_id) - 1;
+ 	buflen = le16_to_cpu(event->event_data_len);
+ 
+ 	if (msgbuf->cur_eventbuf)
+@@ -1189,7 +1283,7 @@ brcmf_msgbuf_process_rx_complete(struct brcmf_msgbuf *msgbuf, void *buf)
+ 	rx_complete = (struct msgbuf_rx_complete *)buf;
+ 	data_offset = le16_to_cpu(rx_complete->data_offset);
+ 	buflen = le16_to_cpu(rx_complete->data_len);
+-	idx = le32_to_cpu(rx_complete->msg.request_id);
++	idx = le32_to_cpu(rx_complete->msg.request_id) - 1;
+ 	flags = le16_to_cpu(rx_complete->flags);
+ 
+ 	skb = brcmf_msgbuf_get_pktid(msgbuf->drvr->bus_if->dev,
+@@ -1319,6 +1413,15 @@ brcmf_msgbuf_process_flow_ring_delete_response(struct brcmf_msgbuf *msgbuf,
  	brcmf_msgbuf_remove_flowring(msgbuf, flowid);
  }
  
@@ -7255,7 +7372,7 @@ index 069ba7016..a0384e423 100644
  
  static void brcmf_msgbuf_process_msgtype(struct brcmf_msgbuf *msgbuf, void *buf)
  {
-@@ -1362,6 +1460,10 @@ static void brcmf_msgbuf_process_msgtype(struct brcmf_msgbuf *msgbuf, void *buf)
+@@ -1362,6 +1465,10 @@ static void brcmf_msgbuf_process_msgtype(struct brcmf_msgbuf *msgbuf, void *buf)
  		brcmf_dbg(MSGBUF, "MSGBUF_TYPE_RX_CMPLT\n");
  		brcmf_msgbuf_process_rx_complete(msgbuf, buf);
  		break;
@@ -7266,7 +7383,7 @@ index 069ba7016..a0384e423 100644
  	default:
  		bphy_err(drvr, "Unsupported msgtype %d\n", msg->msgtype);
  		break;
-@@ -1500,6 +1602,35 @@ void brcmf_msgbuf_delete_flowring(struct brcmf_pub *drvr, u16 flowid)
+@@ -1500,6 +1607,35 @@ void brcmf_msgbuf_delete_flowring(struct brcmf_pub *drvr, u16 flowid)
  	}
  }
  
@@ -7302,7 +7419,54 @@ index 069ba7016..a0384e423 100644
  #ifdef DEBUG
  static int brcmf_msgbuf_stats_read(struct seq_file *seq, void *data)
  {
-@@ -1638,8 +1769,10 @@ int brcmf_proto_msgbuf_attach(struct brcmf_pub *drvr)
+@@ -1559,6 +1695,30 @@ static void brcmf_msgbuf_debugfs_create(struct brcmf_pub *drvr)
+ 	brcmf_debugfs_add_entry(drvr, "msgbuf_stats", brcmf_msgbuf_stats_read);
+ }
+ 
++/*
++ * Newer firmware (e.g. BCM4389) reports the RX buffer size it expects; with
++ * smaller buffers it traps under heavy RX load. Buffers posted before this
++ * keep the default size.
++ */
++static int brcmf_msgbuf_init_done(struct brcmf_pub *drvr)
++{
++	struct brcmf_msgbuf *msgbuf = drvr->proto->pd;
++	__le32 val = 0;
++	u16 size;
++
++	if (brcmf_fil_iovar_data_get(drvr->iflist[0], "rxbufpost_sz", &val,
++				     sizeof(val)))
++		return 0;
++
++	size = le32_to_cpu(val) & 0xffff;
++	if (size && size <= BRCMF_MSGBUF_MAX_RXBUF_SIZE)
++		msgbuf->rx_buf_size = size;
++	brcmf_dbg(MSGBUF, "rxbufpost_sz %u, using %u\n", size,
++		  msgbuf->rx_buf_size);
++
++	return 0;
++}
++
+ int brcmf_proto_msgbuf_attach(struct brcmf_pub *drvr)
+ {
+ 	struct brcmf_bus_msgbuf *if_msgbuf;
+@@ -1614,6 +1774,7 @@ int brcmf_proto_msgbuf_attach(struct brcmf_pub *drvr)
+ 	drvr->proto->add_tdls_peer = brcmf_msgbuf_add_tdls_peer;
+ 	drvr->proto->rxreorder = brcmf_msgbuf_rxreorder;
+ 	drvr->proto->debugfs_create = brcmf_msgbuf_debugfs_create;
++	drvr->proto->init_done = brcmf_msgbuf_init_done;
+ 	drvr->proto->pd = msgbuf;
+ 
+ 	init_waitqueue_head(&msgbuf->ioctl_resp_wait);
+@@ -1630,6 +1791,7 @@ int brcmf_proto_msgbuf_attach(struct brcmf_pub *drvr)
+ 
+ 	msgbuf->rx_dataoffset = if_msgbuf->rx_dataoffset;
+ 	msgbuf->max_rxbufpost = if_msgbuf->max_rxbufpost;
++	msgbuf->rx_buf_size = BRCMF_MSGBUF_MAX_PKT_SIZE;
+ 
+ 	msgbuf->max_ioctlrespbuf = BRCMF_MSGBUF_MAX_IOCTLRESPBUF_POST;
+ 	msgbuf->max_eventbuf = BRCMF_MSGBUF_MAX_EVENTBUF_POST;
+@@ -1638,8 +1800,10 @@ int brcmf_proto_msgbuf_attach(struct brcmf_pub *drvr)
  						     DMA_TO_DEVICE);
  	if (!msgbuf->tx_pktids)
  		goto fail;
