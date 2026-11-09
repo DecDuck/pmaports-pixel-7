@@ -130,10 +130,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..f89ef9efe
+index 000000000..43f192125
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,525 @@
+@@ -0,0 +1,522 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -219,10 +219,7 @@ index 000000000..f89ef9efe
 +		no-map;
 +	};
 +
-+	/*
-+	 * Modem shared memory (downstream cp_rmem*). Wi-Fi rings allocated here
-+	 * got corrupted, so the modem writes to it even without a Linux driver.
-+	 */
++	/* Modem shared memory (downstream cp_rmem*), reserved as on Android */
 +	cp-rmem@e8000000 {
 +		reg = <0x0 0xe8000000 0x2000000>;
 +		no-map;
@@ -1113,10 +1110,10 @@ index 000000000..bf9201277
 +
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201.dtsi b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
 new file mode 100644
-index 000000000..8063a5fd2
+index 000000000..33e0b2da1
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201.dtsi
-@@ -0,0 +1,1595 @@
+@@ -0,0 +1,1602 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google GS201 (Tensor G2) SoC - minimal mainline description.
@@ -1898,6 +1895,13 @@ index 000000000..8063a5fd2
 +			#clock-cells = <1>;
 +			mboxes = <&ap2apm_mailbox>;
 +			shmem = <&apm_sram>;
++			/*
++			 * The bootloader leaves memory at 2028 MHz; start from the
++			 * downstream idle levels.
++			 */
++			assigned-clocks = <&acpm_ipc GS101_CLK_ACPM_DVFS_MIF>,
++					  <&acpm_ipc GS101_CLK_ACPM_DVFS_INT>;
++			assigned-clock-rates = <421000000>, <100000000>;
 +
 +			/* TMU sensors: 0 BIG, 1 MID, 2 LITTLE, 3 G3D, 4 ISP, 5 TPU, 6 AUR */
 +			acpm_tmu: thermal-sensor {
@@ -10766,6 +10770,28 @@ index 5c3aa8983..ed7a58075 100644
  
  	pm_genpd_init(&pd->pd, NULL, !on);
  	ret = of_genpd_add_provider_simple(np, &pd->pd);
+diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
+index cbf3ac9c3..71284e791 100644
+--- a/drivers/power/supply/max17042_battery.c
++++ b/drivers/power/supply/max17042_battery.c
+@@ -1143,13 +1143,13 @@ static void max17042_enable_soc_alerts(struct max17042_chip *chip)
+ 	max17042_set_soc_threshold(chip, 1);
+ }
+ 
++/* Only wake the system for a critically low battery while suspended */
+ static void max17042_suspend_soc_alerts(struct max17042_chip *chip)
+ {
+-	if (chip->chip_type != MAXIM_DEVICE_TYPE_MAX17055)
+-		return;
++	if (chip->chip_type == MAXIM_DEVICE_TYPE_MAX17055)
++		regmap_update_bits(chip->regmap, MAX17055_Config2,
++				   CFG2_DSOCI_BIT_ENBL, 0);
+ 
+-	regmap_update_bits(chip->regmap, MAX17055_Config2,
+-			   CFG2_DSOCI_BIT_ENBL, 0);
+ 	max17042_set_critical_soc_threshold(chip);
+ }
+ 
 diff --git a/drivers/power/supply/max77759_charger.c b/drivers/power/supply/max77759_charger.c
 index f308db3f7..059f63ab2 100644
 --- a/drivers/power/supply/max77759_charger.c
@@ -11061,6 +11087,111 @@ index 636a76260..b9dbbdf30 100644
  
  obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o
 +obj-$(CONFIG_EXYNOS_PMU)		+= gs201-fb-refresh.o
+diff --git a/drivers/soc/samsung/exynos-pmu.c b/drivers/soc/samsung/exynos-pmu.c
+index efccdd63e..48b19da43 100644
+--- a/drivers/soc/samsung/exynos-pmu.c
++++ b/drivers/soc/samsung/exynos-pmu.c
+@@ -18,6 +18,9 @@
+ #include <linux/delay.h>
+ #include <linux/reboot.h>
+ #include <linux/regmap.h>
++#include <linux/suspend.h>
++#include <linux/tick.h>
++#include <linux/topology.h>
+ 
+ #include <linux/soc/samsung/exynos-regs-pmu.h>
+ #include <linux/soc/samsung/exynos-pmu.h>
+@@ -36,6 +39,8 @@ struct exynos_pmu_context {
+ 	 */
+ 	raw_spinlock_t cpupm_lock;
+ 	unsigned long *in_cpuhp;
++	/* CPUs that are idle or offline, for cluster power down */
++	unsigned long *idle_cpus;
+ 	bool sys_insuspend;
+ 	bool sys_inreboot;
+ };
+@@ -226,6 +231,34 @@ EXPORT_SYMBOL_GPL(exynos_get_pmu_regmap_by_phandle);
+  */
+ #define CPU_INFORM_CLEAR	0
+ #define CPU_INFORM_C2		1
++#define CPU_INFORM_CPD		2
++
++/*
++ * The CPD hint lets the firmware power down the whole cluster once its last
++ * CPU goes idle. As on the downstream kernel, only the mid and big clusters
++ * (CPUs 4-7) use it, and only when the idle period is expected to be long.
++ */
++#define GS101_CPD_CPUS		0xf0
++#define GS101_CPD_MIN_IDLE_NS	(10 * NSEC_PER_MSEC)
++
++static bool gs101_cluster_can_power_down(unsigned int cpu)
++{
++	const struct cpumask *cluster = topology_cluster_cpumask(cpu);
++	unsigned int sibling;
++	s64 idle_ns;
++
++	if (!(BIT(cpu) & GS101_CPD_CPUS))
++		return false;
++
++	for_each_cpu(sibling, cluster)
++		if (sibling != cpu && !test_bit(sibling, pmu_context->idle_cpus))
++			return false;
++
++	/* Also called from s2idle, with timekeeping suspended */
++	idle_ns = ktime_to_ns(tick_nohz_get_next_hrtimer()) -
++		  ktime_get_mono_fast_ns();
++	return idle_ns >= GS101_CPD_MIN_IDLE_NS;
++}
+ 
+ /*
+  * __gs101_cpu_pmu_ prefix functions are common code shared by CPU PM notifiers
+@@ -241,6 +274,7 @@ static int __gs101_cpu_pmu_online(unsigned int cpu)
+ 	/* clear cpu inform hint */
+ 	regmap_write(pmu_context->pmureg, GS101_CPU_INFORM(cpuhint),
+ 		     CPU_INFORM_CLEAR);
++	clear_bit(cpu, pmu_context->idle_cpus);
+ 
+ 	mask = BIT(cpu);
+ 
+@@ -301,7 +335,9 @@ static int __gs101_cpu_pmu_offline(unsigned int cpu)
+ 
+ 	/* set cpu inform hint */
+ 	regmap_write(pmu_context->pmureg, GS101_CPU_INFORM(cpuhint),
+-		     CPU_INFORM_C2);
++		     gs101_cluster_can_power_down(cpu) ? CPU_INFORM_CPD :
++							 CPU_INFORM_C2);
++	set_bit(cpu, pmu_context->idle_cpus);
+ 
+ 	mask = BIT(cpu);
+ 	regmap_update_bits(pmu_context->pmuintrgen, GS101_GRP2_INTR_BID_ENABLE,
+@@ -453,6 +489,11 @@ static int setup_cpuhp_and_cpuidle(struct device *dev)
+ 	if (!pmu_context->in_cpuhp)
+ 		return -ENOMEM;
+ 
++	pmu_context->idle_cpus = devm_bitmap_zalloc(dev, num_possible_cpus(),
++						    GFP_KERNEL);
++	if (!pmu_context->idle_cpus)
++		return -ENOMEM;
++
+ 	/* set PMU to power on */
+ 	for_each_online_cpu(cpu)
+ 		gs101_cpuhp_pmu_online(cpu);
+@@ -553,6 +594,15 @@ static int exynos_pmu_probe(struct platform_device *pdev)
+ 
+ static int exynos_cpupm_suspend_noirq(struct device *dev)
+ {
++	/*
++	 * Suspend-to-idle still powers CPUs down through cpuidle, which needs
++	 * the CPU hints; without them the firmware rejects every idle entry.
++	 * pm_suspend_via_firmware() can't be used here, as on PSCI systems it
++	 * is also set for suspend-to-idle.
++	 */
++	if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE)
++		return 0;
++
+ 	raw_spin_lock(&pmu_context->cpupm_lock);
+ 	pmu_context->sys_insuspend = true;
+ 	raw_spin_unlock(&pmu_context->cpupm_lock);
 diff --git a/drivers/soc/samsung/gs201-fb-refresh.c b/drivers/soc/samsung/gs201-fb-refresh.c
 new file mode 100644
 index 000000000..87928597a
