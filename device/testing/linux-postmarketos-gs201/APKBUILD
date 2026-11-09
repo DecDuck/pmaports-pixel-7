@@ -1,7 +1,7 @@
 maintainer=""
 pkgname=linux-postmarketos-gs201
 pkgver=7.3_rc6
-pkgrel=23
+pkgrel=24
 pkgdesc="Google gs201 (Pixel 7 Series) close-to-mainline kernel"
 arch="aarch64"
 _carch="arm64"
@@ -72,5 +72,5 @@ package() {
 sha512sums="
 10dde8872a1d917254bd713ac3aba7fd288cb4d6ae0c2475b7eb33a055826e67dbe9939e0c38822118d6a62a1761e2b40fcf13a83afd25bde1a58ffd3c772320  linux-postmarketos-gs101-e8f42849a581ea8e915ad0f10c25951e696dc6b5.tar.gz
 ba667ce387078dae762d08c3cb37f9aa9ff7cbe8be94da1e0f8c6a999989bed555b2833ba1f88eb4a33594dbdd8890841152e2b5c03003c0a366c555e8d9a2ca  config-postmarketos-gs201.aarch64
-c87f998663feb837929e2ba9b2d1ca7b9c324430816425cf98b4387552ec8ad90263789cae527afd270f917ac0931de083417db3986c10fc9ddba14fb1497126  0001-gs201-panther-bringup.patch
+7970e4e395804bb2444f287cae6b2151e5f10bea4a185711eb30771a625338b20e337384926f6094c6687c70ccd5a1abf1aecd312c376e895a41f8f2146436a4  0001-gs201-panther-bringup.patch
 "

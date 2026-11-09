@@ -130,10 +130,10 @@ index 93c824908..c68dc8c42 100644
 +	gs201-panther.dtb
 diff --git a/arch/arm64/boot/dts/exynos/google/gs201-panther.dts b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
 new file mode 100644
-index 000000000..43f192125
+index 000000000..2289047d2
 --- /dev/null
 +++ b/arch/arm64/boot/dts/exynos/google/gs201-panther.dts
-@@ -0,0 +1,522 @@
+@@ -0,0 +1,566 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Google Pixel 7 (panther)
@@ -576,6 +576,50 @@ index 000000000..43f192125
 +
 +		/* downstream maxim,rsense-default = <500> (10 uOhm units) */
 +		shunt-resistor-micro-ohms = <5000>;
++
++		/*
++		 * ModelGauge m5 model for the ATL pack (downstream maxim,cos-a1-1k,
++		 * battery ID 1k). The 351 ms task period doubles the capacity LSB
++		 * to 2 mAh, so 0x0873 is 4326 mAh.
++		 */
++		maxim,fg-model = /bits/ 16 <
++			0x8c80 0xb770 0xb8f0 0xba50 0xbb40 0xbc30 0xbe00 0xbfd0
++			0xc1b0 0xc3a0 0xc6b0 0xc9c0 0xd020 0xd300 0xd5e0 0xdc30
++			0x0080 0x1070 0x1020 0x0ed0 0x0f00 0x1700 0x1530 0x0c20
++			0x0c40 0x07f0 0x07f0 0x06f0 0x0710 0x06d0 0x06f0 0x06f0
++			0x0200 0x0200 0x0200 0x0200 0x0200 0x0200 0x0200 0x0200
++			0x0200 0x0200 0x0200 0x0200 0x0200 0x0200 0x0200 0x0200
++		>;
++		/* register/value pairs, written in this order */
++		maxim,fg-params = /bits/ 16 <
++			0x36 0xf060	/* IAvgEmpty */
++			0x2a 0x0839	/* RelaxCFG */
++			0x28 0x260e	/* LearnCFG */
++			0x1d 0x4217	/* Config */
++			0xbb 0x0010	/* Config2, without 1% SOC alerts */
++			0x13 0x5f00	/* FullSOCThr */
++			0x35 0x0873	/* FullCAPRep */
++			0x18 0x0873	/* DesignCap */
++			0x46 0x3200	/* dPacc */
++			0x45 0x021c	/* dQacc */
++			0x23 0x0873	/* FullCAPNom */
++			0x3a 0xa561	/* VEmpty */
++			0x12 0x1f00	/* QResidual00 */
++			0x22 0x0d80	/* QResidual10 */
++			0x32 0x0480	/* QResidual20 */
++			0x42 0x0400	/* QResidual30 */
++			0x38 0x0740	/* RCOMP0 */
++			0x39 0x1a02	/* TempCo */
++			0x3c 0x2d00	/* TaskPeriod */
++			0x1e 0x0557	/* ICHGTerm */
++			0x2c 0xed51	/* TGain */
++			0x2d 0x1eba	/* TOff */
++			0x2b 0x3870	/* MiscCFG */
++			0x04 0x1900	/* AtRate */
++			0x49 0x2241	/* ConvgCfg */
++			0xb9 0x0014	/* Curve */
++			0x29 0xc613	/* FilterCFG */
++		>;
 +	};
 +
 +	pmic@66 {
@@ -10771,7 +10815,7 @@ index 5c3aa8983..ed7a58075 100644
  	pm_genpd_init(&pd->pd, NULL, !on);
  	ret = of_genpd_add_provider_simple(np, &pd->pd);
 diff --git a/drivers/power/supply/max17042_battery.c b/drivers/power/supply/max17042_battery.c
-index cbf3ac9c3..71284e791 100644
+index cbf3ac9c3..01e8b63d6 100644
 --- a/drivers/power/supply/max17042_battery.c
 +++ b/drivers/power/supply/max17042_battery.c
 @@ -1143,13 +1143,13 @@ static void max17042_enable_soc_alerts(struct max17042_chip *chip)
@@ -10792,6 +10836,148 @@ index cbf3ac9c3..71284e791 100644
  	max17042_set_critical_soc_threshold(chip);
  }
  
+@@ -1429,6 +1429,129 @@ static const struct power_supply_desc max17042_no_current_sense_psy_desc = {
+ 	.num_properties	= ARRAY_SIZE(max17042_battery_props) - 2,
+ };
+ 
++#define MAX77759_CV_MIXCAP		0xB6
++#define MAX77759_CV_HALFTIME		0xB7
++#define MAX77759_CV_HALFTIME_DEFAULT	0x0600
++#define MAX77759_CONFIG2_LDMDL		BIT(5)
++
++/*
++ * The MAX77759 fuel gauge is a ModelGauge m5 device. Nothing but the OS loads
++ * the battery model, so after a gauge reset it runs on the POR defaults
++ * (3000 mAh design capacity, generic OCV table) and reports a wrong SOC.
++ * Load the model and parameters from DT when the gauge was reset or holds a
++ * different configuration; otherwise keep its learned state.
++ */
++static int max77759_load_model(struct max17042_chip *chip)
++{
++	struct device_node *np = chip->dev->of_node;
++	u16 model[MAX17042_CHARACTERIZATION_DATA_SIZE];
++	struct regmap *map = chip->regmap;
++	unsigned int design_cap = 0, task_period = MAX17042_DEFAULT_TASK_PERIOD;
++	unsigned int full_cap_nom = 0, status, val, period;
++	u16 *params;
++	int i, n, ret;
++
++	n = of_property_count_u16_elems(np, "maxim,fg-params");
++	if (n <= 0)
++		return 0;
++	if (n % 2)
++		return dev_err_probe(chip->dev, -EINVAL,
++				     "maxim,fg-params must be register/value pairs\n");
++
++	ret = of_property_read_u16_array(np, "maxim,fg-model", model,
++					 ARRAY_SIZE(model));
++	if (ret)
++		return dev_err_probe(chip->dev, ret, "invalid maxim,fg-model\n");
++
++	params = kcalloc(n, sizeof(*params), GFP_KERNEL);
++	if (!params)
++		return -ENOMEM;
++
++	ret = of_property_read_u16_array(np, "maxim,fg-params", params, n);
++	if (ret)
++		goto out;
++
++	for (i = 0; i < n; i += 2) {
++		if (params[i] == MAX17042_DesignCap)
++			design_cap = params[i + 1];
++		else if (params[i] == MAX17042_TaskPeriod)
++			task_period = params[i + 1];
++		else if (params[i] == MAX17042_FullCAPNom)
++			full_cap_nom = params[i + 1];
++	}
++
++	ret = regmap_read(map, MAX17042_STATUS, &status);
++	if (!ret)
++		ret = regmap_read(map, MAX17042_DesignCap, &val);
++	if (!ret)
++		ret = regmap_read(map, MAX17042_TaskPeriod, &period);
++	if (ret)
++		goto out;
++
++	if (!(status & STATUS_POR_BIT) && val == design_cap &&
++	    period == task_period)
++		goto out;
++
++	ret = regmap_read_poll_timeout(map, MAX17042_FSTAT, val,
++				       !(val & MAX17055_FSTAT_DNR_BIT),
++				       MAX17055_DNR_POLL_US,
++				       MAX17055_DNR_TIMEOUT_US);
++	if (ret)
++		goto out;
++
++	max17042_unlock_model(chip);
++	for (i = 0; i < ARRAY_SIZE(model) && !ret; i++)
++		ret = regmap_write(map, MAX17042_MODELChrTbl + i, model[i]);
++	for (i = 0; i < ARRAY_SIZE(model) && !ret; i++) {
++		ret = regmap_read(map, MAX17042_MODELChrTbl + i, &val);
++		if (!ret && val != model[i])
++			ret = -EIO;
++	}
++	max17042_lock_model(chip);
++	if (ret) {
++		dev_err(chip->dev, "failed to write battery model: %d\n", ret);
++		goto out;
++	}
++
++	ret = regmap_write(map, MAX17042_RepCap, 0);
++	if (!ret)
++		ret = regmap_write(map, MAX17042_VFSOC0Enable, VFSOC0_UNLOCK);
++	if (!ret)
++		ret = regmap_read(map, MAX17042_VFSOC, &val);
++	if (!ret)
++		ret = regmap_write(map, MAX17042_VFSOC0, val);
++	for (i = 0; i < n && !ret; i += 2)
++		ret = regmap_write(map, params[i], params[i + 1]);
++	if (!ret && full_cap_nom)
++		ret = regmap_write(map, MAX77759_CV_MIXCAP,
++				   full_cap_nom * 3 / 4);
++	if (!ret && full_cap_nom)
++		ret = regmap_write(map, MAX77759_CV_HALFTIME,
++				   MAX77759_CV_HALFTIME_DEFAULT);
++	regmap_write(map, MAX17042_VFSOC0Enable, VFSOC0_LOCK);
++	if (ret)
++		goto out;
++
++	ret = regmap_update_bits(map, MAX17055_Config2,
++				 MAX77759_CONFIG2_LDMDL,
++				 MAX77759_CONFIG2_LDMDL);
++	if (!ret)
++		ret = regmap_read_poll_timeout(map, MAX17055_Config2, val,
++					       !(val & MAX77759_CONFIG2_LDMDL),
++					       50 * USEC_PER_MSEC,
++					       2 * USEC_PER_SEC);
++	if (ret) {
++		dev_err(chip->dev, "battery model load failed: %d\n", ret);
++		goto out;
++	}
++
++	ret = regmap_update_bits(map, MAX17042_STATUS, STATUS_POR_BIT, 0);
++	dev_info(chip->dev, "loaded battery model\n");
++out:
++	kfree(params);
++	return ret;
++}
++
+ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq,
+ 			  enum max170xx_chip_type chip_type)
+ {
+@@ -1494,6 +1617,11 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
+ 
+ 	chip->task_period = MAX17042_DEFAULT_TASK_PERIOD;
+ 	if (chip->chip_type == MAXIM_DEVICE_TYPE_MAX77759) {
++		ret = max77759_load_model(chip);
++		if (ret)
++			dev_warn(dev, "running without battery model: %d\n",
++				 ret);
++
+ 		ret = regmap_read(chip->regmap, MAX17042_TaskPeriod, &val);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret,
 diff --git a/drivers/power/supply/max77759_charger.c b/drivers/power/supply/max77759_charger.c
 index f308db3f7..059f63ab2 100644
 --- a/drivers/power/supply/max77759_charger.c
